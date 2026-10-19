@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { createRecord, confirmRecord, resetRecord, reclassifyRecord, quadrantLabels, quadrant, statusLabel, nextQuestion, parseArchive, MAX_TEXT, type Archive, type CognitiveRecord, type Kind, type EntryPoint } from './domain';
 import { IndexedDBRepository } from './storage';
 import { AIService, NoAIAdapter } from './ai';
+import { APP_VERSION, subscribeUpdates, getUpdateState, checkForUpdates, applyUpdate } from './pwa';
 const repository = new IndexedDBRepository();
 const ai = new AIService(repository, new NoAIAdapter());
 type Panel = 'inbox' | 'shared' | 'gaps' | 'settings' | 'write';
 const panelTitle: Record<Panel, string> = { inbox: '我的记录', shared: '共同认知', gaps: '已知的未知', settings: '数据与隐私', write: '记一笔' };
 export default function App() {
   const title = '知不知';
+  const update = useSyncExternalStore(subscribeUpdates, getUpdateState);
   const [archive, setArchive] = useState<Archive>();
   const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [panel, setPanel] = useState<Panel>(); const [text, setText] = useState('');
@@ -41,18 +43,24 @@ export default function App() {
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
   }, [text, panel]);
   async function run(action: () => Promise<void>, message: string) {
-    if (mutationLock.current) return false;
+    if (mutationLock.current || update.applying) return false;
     mutationLock.current = true; setBusy(true); setError(''); setNotice('');
     try { await action(); await reload(); channel.current?.postMessage('changed'); setNotice(message); return true; }
     catch (e) { setError(e instanceof Error ? e.message : '操作未完成，请重试'); return false; }
     finally { mutationLock.current = false; setBusy(false); }
   }
   function close() {
-    if (busy) return;
+    if (busy || update.applying) return;
     if (panel === 'write' && text.trim() && !window.confirm('还没有保存。确定放弃这段记录？')) return;
     dialog.current?.close(); setPanel(undefined); setText(''); setAnswerId(undefined);
   }
-  function write(id?: string, initialKind: Kind = 'personal', origin: EntryPoint = 'lower_right') { setText(''); setKind(initialKind); setEntryPoint(origin); setAnswerId(id); setError(''); setPanel('write'); }
+  function updateApp() {
+    if (mutationLock.current || update.applying || (panel === 'write' && text.length > 0)) return;
+    mutationLock.current = true;
+    if (!applyUpdate()) mutationLock.current = false;
+  }
+  useEffect(() => { if (!update.applying) mutationLock.current = false; }, [update.applying]);
+  function write(id?: string, initialKind: Kind = 'personal', origin: EntryPoint = 'lower_right') { if (update.applying) return; setText(''); setKind(initialKind); setEntryPoint(origin); setAnswerId(id); setError(''); setPanel('write'); }
   async function save(e: FormEvent) {
     e.preventDefault();
     const success = await run(() => repository.add(createRecord(text, kind, entryPoint), answerId), '已保存在本机。AI 尚未理解这条记录。');
@@ -106,6 +114,7 @@ export default function App() {
       <div className="vertical-label bottom">AI 不知道 <span>↓</span></div>
     </div>
     <div className="below-map"><span><i className={`dot ${!online ? 'offline' : ''}`}/>{offlineError ? '离线缓存失败，请联网重试' : !online ? '当前离线 · 仍可记录' : offlineReady ? '已可离线使用' : '记录保存在本机'}</span><button className="text-button" disabled={!archive} onClick={() => setPanel('inbox')}>待理解记录 {groups.inbox.length} <span>→</span></button></div>
+    {update.available && !panel && <aside className="update-notice" aria-label="应用更新"><span>有新版本</span><button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button></aside>}
     {!archive && !error && <p role="status">正在读取本机记录…</p>}
     {notice && <p role="status" className="notice">{notice}</p>}
     {!panel && error && <div role="alert" className="error">{error} <button onClick={() => void run(reload, '已重新读取本机资料。')}>重试</button></div>}
@@ -113,7 +122,7 @@ export default function App() {
       <div className="dialog-header"><div><p className="eyebrow">Know-unknown</p><h2 id="panel-title">{panel && panelTitle[panel]}</h2></div><button className="close" disabled={busy} onClick={close} aria-label="关闭">×</button></div>
       {panel === 'write' && <form onSubmit={save}><div className="kind-picker" role="group" aria-label="记录类型"><button type="button" aria-pressed={kind === 'personal'} onClick={() => setKind('personal')}>我知道</button><button type="button" aria-pressed={kind === 'known_unknown'} onClick={() => setKind('known_unknown')}>我还不知道</button></div><label htmlFor="note">{kind === 'personal' ? '记下一件你知道的事' : '记下一件你还不明白的事'}</label><textarea id="note" autoFocus value={text} maxLength={MAX_TEXT} disabled={busy} onChange={e => setText(e.target.value)} placeholder={kind === 'personal' ? '一点知识、一个想法、一次感受，都可以。' : '例如：我还不明白，为什么开会前总是紧张。'}/><div className="editor-bottom"><span>{text.length} / {MAX_TEXT}</span><button className="primary" disabled={busy || !text.trim()}>{busy ? '保存中…' : '保存到本机'}</button></div><p className="hint" aria-live="polite">保存到：{kind === 'known_unknown' ? quadrantLabels.upper_left : quadrantLabels.lower_right}。由你决定归类，保存不等于 AI 理解。</p></form>}
       {(panel === 'inbox' || panel === 'shared' || panel === 'gaps') && <div><p className="panel-description">{panel === 'inbox' ? '这些记录已存好，AI 尚未理解。' : panel === 'shared' ? '这里的原文与理解建议只读。确认代表你认可这一次理解。' : '只展示你主动记录的未知与困惑，不替你判断。'}</p>{panel === 'inbox' && questionPrompt}{groups[panel].length ? [...groups[panel]].reverse().map(recordView) : <div className="empty"><span>○</span><h3>{panel === 'shared' ? '共同认知，慢慢形成' : panel === 'gaps' ? '好奇心还未落笔' : '这里还没有记录'}</h3><p>{panel === 'shared' ? '接入模型并核对理解后，记录会出现在这里。' : '从右下角记下一件小事就好。'}</p></div>}{panel !== 'shared' && <button className="primary full" onClick={() => write(undefined, panel === 'gaps' ? 'known_unknown' : 'personal', panel === 'gaps' ? 'upper_left' : 'record_list')}>记一笔</button>}</div>}
-      {panel === 'settings' && <div className="settings"><section><h3>你的记录，留在你的设备上</h3><p>首版没有账号、云同步或真实模型。资料保存在当前浏览器，未作应用级加密。不同浏览器不会自动共享。</p><p>清理站点、隐私浏览或设备空间不足可能导致资料丢失。建议定期导出；导出文件为明文，请妥善保存。</p></section><div className="data-actions"><button disabled={busy || !archive} onClick={() => void download()}>导出 JSON · {records.length} 条</button><label className="file-button">从 JSON 恢复<input type="file" accept=".json,application/json" disabled={busy || !archive} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void restore(file); }}/></label><button disabled={busy} onClick={() => void run(async () => { if (!navigator.storage?.persist) throw new Error('当前浏览器不支持请求持久保存'); const granted = await navigator.storage.persist(); if (!granted) throw new Error('浏览器尚未授予持久保存，请继续定期导出'); }, '浏览器已允许持久保存，仍建议定期导出。')}>请求浏览器保留资料</button></div><section><h3>关于 AI</h3><p>当前不收集 API Key、不发送记录。未来支持自填模型 Key 或可选本地模型；只有你主动要求理解时，才发送选中的记录。</p></section><button className="danger text-button" disabled={busy || !archive} onClick={() => { if (window.confirm('清空全部记录与跳过的问题？此操作无法撤销，建议先导出。')) void run(() => repository.clear(), '本机个人资料已清空。'); }}>清空本机全部资料</button></div>}
+      {panel === 'settings' && <div className="settings"><section><h3>应用版本 {APP_VERSION}</h3><p>数据格式 {archive?.schemaVersion ?? '…'} · 更新应用会保留本机已保存记录。</p><div className="record-actions"><button disabled={busy || update.checking || update.applying} onClick={() => void checkForUpdates()}>{update.checking ? '检查中…' : '检查更新'}</button>{update.available && <button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button>}</div><p role="status">{update.message}</p></section><section><h3>你的记录，留在你的设备上</h3><p>首版没有账号、云同步或真实模型。资料保存在当前浏览器，未作应用级加密。不同浏览器不会自动共享。</p><p>清理站点、隐私浏览或设备空间不足可能导致资料丢失。建议定期导出；导出文件为明文，请妥善保存。</p></section><div className="data-actions"><button disabled={busy || !archive} onClick={() => void download()}>导出 JSON · {records.length} 条</button><label className="file-button">从 JSON 恢复<input type="file" accept=".json,application/json" disabled={busy || !archive} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void restore(file); }}/></label><button disabled={busy} onClick={() => void run(async () => { if (!navigator.storage?.persist) throw new Error('当前浏览器不支持请求持久保存'); const granted = await navigator.storage.persist(); if (!granted) throw new Error('浏览器尚未授予持久保存，请继续定期导出'); }, '浏览器已允许持久保存，仍建议定期导出。')}>请求浏览器保留资料</button></div><section><h3>关于 AI</h3><p>当前不收集 API Key、不发送记录。未来支持自填模型 Key 或可选本地模型；只有你主动要求理解时，才发送选中的记录。</p></section><button className="danger text-button" disabled={busy || !archive} onClick={() => { if (window.confirm('清空全部记录与跳过的问题？此操作无法撤销，建议先导出。')) void run(() => repository.clear(), '本机个人资料已清空。'); }}>清空本机全部资料</button></div>}
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
     </dialog>
