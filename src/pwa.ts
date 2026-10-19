@@ -1,6 +1,6 @@
 import { registerSW } from 'virtual:pwa-register';
 
-export const APP_VERSION = '0.1.1';
+export const APP_VERSION = '0.1.2';
 type UpdateState = { available: boolean; checking: boolean; applying: boolean; message: string };
 let state: UpdateState = { available: false, checking: false, applying: false, message: '' };
 const listeners = new Set<() => void>();

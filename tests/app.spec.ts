@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { createRecord, makeArchive, withAnalysis, confirmRecord } from '../src/domain';
 const appPath = process.env.APP_BASE_PATH || '/';
 async function write(page: Page, text: string, gap = false) {
-  await page.getByRole('button',{name:/04/}).click();
+  await page.getByRole('button',{name:/象限四/}).click();
   if (gap) await page.getByRole('button',{name:'我还不知道',exact:true}).click();
   await page.getByRole('textbox').fill(text);
   await page.getByRole('button',{name:'保存到本机',exact:true}).click();
@@ -11,24 +12,24 @@ async function write(page: Page, text: string, gap = false) {
 test('移动端：离线保存、刷新、只读、跳过、导出、恢复和清空', async ({page,context}) => {
   const errors: string[] = []; page.on('pageerror',e => errors.push(e.message));
   await page.goto(appPath); await expect(page.getByRole('heading',{level:1})).toBeVisible();
-  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await write(page,'我喜欢提前看会议议程');
   await write(page,'我还不会炒鸡蛋',true);
-  await page.getByRole('button',{name:/待理解记录 1/}).click();
+  await page.getByRole('button',{name:/全部记录 2/}).click();
   await page.getByRole('button',{name:'跳过',exact:true}).click();
   await expect(page.getByText('最近有没有一件你还不明白、想继续探索的事？')).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await context.setOffline(true); await page.reload();
-  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   await write(page,'这是一条离线记录');
   await page.reload();
-  await page.getByRole('button',{name:/待理解记录 2/}).click();
+  await page.getByRole('button',{name:/全部记录 3/}).click();
   await expect(page.getByText('这是一条离线记录',{exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'等待接入模型'}).first()).toBeDisabled();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
-  await page.getByRole('button',{name:/01/}).click();
+  await page.getByRole('button',{name:/象限二/}).click();
   await expect(page.getByText('我还不会炒鸡蛋',{exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await page.getByRole('button',{name:'关闭',exact:true}).click();
@@ -43,7 +44,7 @@ test('移动端：离线保存、刷新、只读、跳过、导出、恢复和�
   await page.locator('input[type=file]').setInputFiles(file!);
   await expect(page.getByRole('button',{name:'导出 JSON · 3 条'})).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click(); await page.reload();
-  await page.getByRole('button',{name:/待理解记录 2/}).click();
+  await page.getByRole('button',{name:/全部记录 3/}).click();
   await expect(page.getByText('最近有没有一件你还不明白、想继续探索的事？')).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -52,15 +53,15 @@ test('移动端：离线保存、刷新、只读、跳过、导出、恢复和�
   await context.setOffline(false);
 });
 test('失败保留输入；坏归档不覆盖；右上确认与退回', async ({page}) => {
-  await page.goto(appPath); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await page.goto(appPath); await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   // Force a real transaction-open failure, then verify input remains visible.
   await page.evaluate(() => { IDBDatabase.prototype.transaction = () => { throw new Error('模拟存储不可用'); }; });
-  await page.getByRole('button',{name:/04/}).click(); await page.getByRole('textbox').fill('不能丢掉的草稿');
+  await page.getByRole('button',{name:/象限四/}).click(); await page.getByRole('textbox').fill('不能丢掉的草稿');
   await page.getByRole('button',{name:'保存到本机'}).click();
   await expect(page.getByRole('alert')).toContainText('模拟存储不可用');
   await expect(page.getByRole('textbox')).toHaveValue('不能丢掉的草稿');
   page.once('dialog',d => d.accept()); await page.getByRole('button',{name:'关闭',exact:true}).click();
-  await page.reload(); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await page.reload(); await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   await write(page,'原始文字');
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
   await page.locator('input[type=file]').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{"schemaVersion":99}')});
@@ -72,7 +73,7 @@ test('失败保留输入；坏归档不覆盖；右上确认与退回', async ({
     const db = await new Promise<IDBDatabase>((resolve,reject) => {const r=indexedDB.open('cognitive-quadrants-v1',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
     await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');const store=tx.objectStore('records');const r=store.getAll();r.onsuccess=()=>{const record=r.result[0];store.put({...record,status:'understood',quadrant:'upper_right',revision:crypto.randomUUID(),analysis:{summary:'仅测试用理解',provider:'test',model:'fake',generatedAt:new Date().toISOString()}});};tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
   });
-  await page.reload(); await page.getByRole('button',{name:/02/}).click();
+  await page.reload(); await page.getByRole('button',{name:/象限一/}).click();
   await expect(page.getByText('仅测试用理解',{exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await page.getByRole('button',{name:'确认这次理解'}).click(); await expect(page.getByText('已确认',{exact:true})).toBeVisible();
@@ -82,6 +83,10 @@ test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆�
   await page.goto(`${appPath}?category=feeling`);
   await expect(page.getByRole('heading',{level:1})).toHaveText('知不知');
   await expect(page.getByRole('navigation')).toHaveCount(0);
+  for (const [selector,label] of [['.shared','象限一'],['.gaps','象限二'],['.unknown','象限三'],['.inbox','象限四']]) {
+    const number = page.locator(`${selector} .quad-number strong`);
+    await expect(number).toHaveText(label); await expect(number).toHaveCSS('font-weight','700');
+  }
   for (const [width,height,zoom] of [[360,640,1],[390,844,1],[1280,844,1],[1280,600,1],[1280,844,1.5],[1280,844,2]]) {
     await page.setViewportSize({width,height});
     await page.evaluate(scale => {document.documentElement.style.zoom=String(scale);},zoom);
@@ -115,7 +120,7 @@ test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆�
 });
 
 for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
-  await page.goto(appPath); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await page.goto(appPath); await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   const stamp=new Date().toISOString();
   const records=['knowledge','feeling','unclassified'].map((category,i)=>({id:`legacy-${i}`,revision:`legacy-rev-${i}`,text:`旧${category}记录`,kind:'personal',status:'pending',createdAt:stamp,updatedAt:stamp,...(version===2?{category}:{})}));
   const legacy={schemaVersion:version,exportedAt:stamp,records,skippedQuestionIds:[]};
@@ -125,7 +130,7 @@ for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存�
   await expect(page.getByRole('button',{name:'导出 JSON · 3 条'})).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await expect(page.getByRole('button',{name:/待分类/})).toHaveCount(0);
-  await page.getByRole('button',{name:/待理解记录 3/}).click();
+  await page.getByRole('button',{name:/全部记录 3/}).click();
   for (const record of records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:/归入/})).toHaveCount(0);
   await page.getByRole('button',{name:'关闭',exact:true}).click();
@@ -138,7 +143,7 @@ for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存�
   page.once('dialog',d=>d.accept());await page.locator('input[type=file]').setInputFiles(file!);
   await expect(page.getByRole('button',{name:'导出 JSON · 4 条'})).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click(); await page.reload();
-  await page.getByRole('button',{name:/待理解记录 4/}).click();
+  await page.getByRole('button',{name:/全部记录 4/}).click();
   await expect(page.getByText('无需分类的新记录',{exact:true})).toBeVisible();
   for (const record of records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
 });
@@ -146,22 +151,24 @@ for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存�
 
 test('左上录入继承象限，JSON 保留来源，用户可调整并离线恢复', async ({page,context}) => {
   await page.goto(appPath);
-  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
-  await page.getByRole('button',{name:/01/}).click();
+  await page.getByRole('button',{name:/象限二/}).click();
   await page.getByRole('button',{name:'记一笔',exact:true}).click();
   await expect(page.getByRole('button',{name:'我还不知道',exact:true})).toHaveAttribute('aria-pressed','true');
-  await expect(page.getByText(/保存到：左上/)).toBeVisible();
+  await expect(page.getByText(/保存到：象限二 · 左上/)).toBeVisible();
   await page.getByRole('textbox').fill('这是一个我指定放在左上的陈述');
   await page.getByRole('button',{name:'保存到本机',exact:true}).click();
-  await expect(page.getByRole('button',{name:/01/})).toContainText('1 条探索');
-  await expect(page.getByRole('button',{name:/待理解记录 0/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/象限二/})).toContainText('1 条探索');
+  await expect(page.getByRole('button',{name:/全部记录 1/})).toBeVisible();
   await write(page,'这是来自右下的记录');
-  await page.getByRole('button',{name:/待理解记录 1/}).click();
+  await page.getByRole('button',{name:/全部记录 2/}).click();
   await page.getByRole('button',{name:'移到左上',exact:true}).click();
-  await page.getByRole('button',{name:'关闭',exact:true}).click();
-  await page.getByRole('button',{name:/01/}).click();
+  await expect(page.getByRole('heading',{name:'全部记录',exact:true})).toBeVisible();
   const moved=page.locator('article').filter({hasText:'这是来自右下的记录'});
+  await expect(moved).toBeVisible();
+  await expect(moved).toContainText('象限二 · 左上');
+  await expect(page.locator('article')).toHaveCount(2);
   await moved.getByRole('button',{name:'移到右下',exact:true}).click();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
@@ -182,8 +189,51 @@ test('左上录入继承象限，JSON 保留来源，用户可调整并离线恢
   await page.locator('input[type=file]').setInputFiles(file!);
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await context.setOffline(true);await page.reload();
-  await expect(page.getByRole('button',{name:/01/})).toContainText('1 条探索');
-  await expect(page.getByRole('button',{name:/待理解记录 1/})).toBeVisible();
-  await page.getByRole('button',{name:/01/}).click();
+  await expect(page.getByRole('button',{name:/象限二/})).toContainText('1 条探索');
+  await expect(page.getByRole('button',{name:/全部记录 2/})).toBeVisible();
+  await page.getByRole('button',{name:/象限二/}).click();
   await expect(page.getByText('这是一个我指定放在左上的陈述',{exact:true})).toBeVisible();
+});
+
+
+test('全部记录包含所有认知状态，归类、确认与退回后仍在同一列表', async ({page,context}) => {
+  // Model suggestions are synthetic test evidence; this does not validate a real model.
+  const fake = {summary:'仅用于列表测试的建议',provider:'test',model:'fake',generatedAt:new Date().toISOString()};
+  const pending = createRecord('全量列表待理解原文','personal');
+  const gap = createRecord('全量列表待探索原文','known_unknown');
+  const understood = withAnalysis(createRecord('全量列表待确认原文','personal'),fake);
+  const confirmed = confirmRecord(withAnalysis(createRecord('全量列表已确认原文','personal'),fake));
+  const input = makeArchive([pending,gap,understood,confirmed],['local:help:v3','local:gap:v3']);
+  await page.goto(appPath);
+  await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles({name:'synthetic-states.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(input))});
+  await expect(page.getByRole('button',{name:'导出 JSON · 4 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:/全部记录 4/}).click();
+  await expect(page.locator('article')).toHaveCount(4);
+  for (const record of input.records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
+  const moved=page.locator('article').filter({hasText:pending.text});
+  await moved.getByRole('button',{name:'移到左上',exact:true}).click();
+  await expect(moved).toBeVisible(); await expect(moved).toContainText('象限二 · 左上');
+  const proposed=page.locator('article').filter({hasText:understood.text});
+  await proposed.getByRole('button',{name:'确认这次理解',exact:true}).click();
+  await expect(proposed.locator('.badge')).toHaveText('已确认');
+  const withdrawn=page.locator('article').filter({hasText:confirmed.text});
+  await withdrawn.getByRole('button',{name:'撤回确认',exact:true}).click();
+  await expect(withdrawn).toContainText('象限四 · 右下');
+  await expect(withdrawn.locator('.badge')).toHaveText('待理解');
+  await expect(page.locator('article')).toHaveCount(4);
+  await context.setOffline(true); await page.reload();
+  await page.getByRole('button',{name:/全部记录 4/}).click();
+  await expect(page.locator('article')).toHaveCount(4);
+  await expect(page.locator('article').filter({hasText:pending.text})).toContainText('象限二 · 左上');
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  const downloading=page.waitForEvent('download'); await page.getByRole('button',{name:'导出 JSON · 4 条'}).click();
+  const file=await(await downloading).path();const exported=JSON.parse(await readFile(file!,'utf8'));
+  expect(exported.records.map((r:{id:string})=>r.id).sort()).toEqual(input.records.map(r=>r.id).sort());
+  expect(exported.cognitionContext.quadrants.upper_right).toMatchObject({number:1,name:'象限一',position:'右上'});
+  expect(exported.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',position:'左上'});
 });

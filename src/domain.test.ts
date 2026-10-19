@@ -84,7 +84,10 @@ describe('明确象限、录入来源与认知证据分别保存', () => {
     const input = makeAIInput(record);
     expect(input.record).toMatchObject({quadrant:'upper_left',status:'pending',placement:{declaredQuadrant:'upper_left',source:'user',entryPoint:'upper_left'}});
     expect(input.cognitionContext.axes.horizontal.left).toBe('我不知道');
-    expect(input.cognitionContext.quadrants.upper_left.label).toBe('已知的未知');
+    expect(input.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',label:'已知的未知'});
+    expect(input.cognitionContext.quadrants.upper_right).toMatchObject({number:1,name:'象限一'});
+    expect(input.cognitionContext.quadrants.lower_left).toMatchObject({number:3,name:'象限三'});
+    expect(input.cognitionContext.quadrants.lower_right).toMatchObject({number:4,name:'象限四'});
     expect(input.cognitionContext.meanings.declaredQuadrant).toContain('不能根据内容静默重分类');
     expect(parseArchive(makeArchive([record],[])).records).toEqual([record]);
   });

@@ -54,7 +54,8 @@ header h1 { font-size: 18px; font-weight: 500; letter-spacing: .2px; line-height
 .shared { background: #e0e9df; }
 .unknown { background: repeating-linear-gradient(135deg, #eeeee6, #eeeee6 4px, #ebede4 4px, #ebede4 5px); color: #93998b; }
 .inbox { background: #365d51; color: #f4f5e9; }
-.quad-number { display: flex; justify-content: space-between; width: 100%; font-size: 10px; letter-spacing: 1px; opacity: .65; }
+.quad-number { display: flex; justify-content: space-between; width: 100%; font-size: 12px; letter-spacing: 0; }
+.quad-number strong { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-weight: 700; }
 .quad-number > span { font-size: 15px; }
 .quad-icon { font-family: Georgia, serif; font-size: 35px; line-height: 1; margin: 20px 0 14px; font-weight: 400; }
 .quad-icon.plus { font-family: system-ui; font-weight: 200; }

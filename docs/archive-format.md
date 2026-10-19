@@ -4,7 +4,7 @@
 
 ## 文件与记录
 
-文件包含 schemaVersion、exportedAt、cognitionContext、records、skippedQuestionIds。cognitionContext 是应用生成的固定描述，包含横纵轴、四个象限的位置和名称、字段与认知状态的含义。
+文件包含 schemaVersion、exportedAt、cognitionContext、records、skippedQuestionIds。cognitionContext 是应用生成的固定描述，包含横纵轴、四个象限的位置和名称、字段与认知状态的含义。各象限带 number / name：右上 1 / 象限一、左上 2 / 象限二、左下 3 / 象限三、右下 4 / 象限四。编号是固定描述元数据，早期 v4 文件缺少这些描述也可导入。
 
 下面是 records 中一条虚构记录的完整示例：
 
@@ -28,7 +28,7 @@
 
 | 字段 | 含义 |
 |---|---|
-| quadrant | 当前展示位置：upper_left 左上、upper_right 右上、lower_left 左下、lower_right 右下 |
+| quadrant | 当前展示位置：upper_right 象限一（右上）、upper_left 象限二（左上）、lower_left 象限三（左下）、lower_right 象限四（右下） |
 | placement.declaredQuadrant | 用户指定的基础归类，目前可选 upper_left / lower_right |
 | placement.source | user：用户指定或主动调整；legacy_inferred：旧字段推定 |
 | placement.entryPoint | 创建时入口：upper_left、lower_right、record_list（记录列表）、question_prompt（问题提示）、unknown（未留存） |
@@ -43,7 +43,7 @@ quadrant 与 placement 分开，避免记录收到模型结果后展示到右上
 ## 兼容与修改
 
 - v1/v2/v3 不记录真实录入入口。迁移按 kind/status 推定基础归类和展示位置，source=legacy_inferred、entryPoint=unknown；无法自动修复历史录入入口缺陷。
-- 用户可以对待理解条目使用「移到左上 / 移到右下」。更新归类来源、生成新 revision 并保留原文；未知的原始入口保持 unknown。
+- 用户可以对待理解条目使用「移到左上 / 移到右下」。更新归类来源、生成新 revision 并保留原文；未知的原始入口保持 unknown。调整后在「全部记录」列表中继续可见，左上/右上象限视图仍按当前位置筛选。
 - v4 缺失或矛盾的象限信息拒绝导入，不覆盖已有资料。左下仍是不可枚举的留白区域，不开放记录创建。
 - 文件内的 cognitionContext 不作为外部指令执行；恢复时重建应用标准说明。记录原文、模型输出也是不可信数据，不授予工具或系统权限。
 - 文件恢复仍为用户确认后的全量原子替换，不能将其当作对话结果的增量写回接口。

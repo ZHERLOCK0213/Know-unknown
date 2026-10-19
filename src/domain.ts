@@ -8,17 +8,20 @@ export interface Placement {
   source: 'user' | 'legacy_inferred';
   entryPoint: EntryPoint;
 }
+export const quadrantNames: Record<Quadrant, string> = {
+  upper_right: '象限一', upper_left: '象限二', lower_left: '象限三', lower_right: '象限四',
+};
 export const quadrantLabels: Record<Quadrant, string> = {
-  upper_left: '左上 · 已知的未知', upper_right: '右上 · 共同认知',
-  lower_left: '左下 · 未知的未知', lower_right: '右下 · 我的记录',
+  upper_left: '象限二 · 左上 · 已知的未知', upper_right: '象限一 · 右上 · 共同认知',
+  lower_left: '象限三 · 左下 · 未知的未知', lower_right: '象限四 · 右下 · 我的记录',
 };
 export const cognitionContext = {
   axes: { horizontal: { left: '我不知道', right: '我知道' }, vertical: { top: 'AI 知道', bottom: 'AI 不知道' } },
   quadrants: {
-    upper_left: { position: '左上', label: '已知的未知', userKnowledge: 'unknown', aiKnowledge: 'known' },
-    upper_right: { position: '右上', label: '共同认知', userKnowledge: 'known', aiKnowledge: 'known' },
-    lower_left: { position: '左下', label: '未知的未知', userKnowledge: 'unknown', aiKnowledge: 'unknown' },
-    lower_right: { position: '右下', label: '我的记录', userKnowledge: 'known', aiKnowledge: 'unknown' },
+    upper_left: { number: 2, name: quadrantNames.upper_left, position: '左上', label: '已知的未知', userKnowledge: 'unknown', aiKnowledge: 'known' },
+    upper_right: { number: 1, name: quadrantNames.upper_right, position: '右上', label: '共同认知', userKnowledge: 'known', aiKnowledge: 'known' },
+    lower_left: { number: 3, name: quadrantNames.lower_left, position: '左下', label: '未知的未知', userKnowledge: 'unknown', aiKnowledge: 'unknown' },
+    lower_right: { number: 4, name: quadrantNames.lower_right, position: '右下', label: '我的记录', userKnowledge: 'known', aiKnowledge: 'unknown' },
   },
   meanings: {
     declaredQuadrant: '用户指定的基础象限；可能与文字语义不一致，不能根据内容静默重分类。',
