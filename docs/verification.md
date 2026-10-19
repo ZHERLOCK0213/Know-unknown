@@ -131,3 +131,7 @@ npm run test:e2e
 - APP_BASE_PATH=/Know-unknown/ npm run test:e2e：7 项通过（6.3 秒）。包含从左上实际录入、保存目标、手动移动、导出字段、坏 v4 归档不覆盖、v1/v2/v3 恢复与离线重开，以及原有状态、存储失败和坐标几何场景。
 - 独立新浏览器 390×844 复核：main/header 均只有一个，底部状态与卡片不重叠；左上录入默认按钮 aria-pressed=true，保存目标为左上。缩放后截图在重置视口并重新加载后采集，已目视检查手机截图。
 - 个人原文未复制到仓库或测试。模型接口验证仍是 fake adapter，不代表真实模型联通；本轮没有云服务、Markdown 记忆存储或对话分析写回。iPhone 真机更新和调整旧记录仍待用户验收。
+
+- 坐标截图用例在重置视口后重新加载，单独复核 1 项通过（1.3 秒）。
+- 应用提交 dbdb17c 已推送，[GitHub Actions 39218141213](https://github.com/ZHERLOCK0213/Know-unknown/actions/runs/39218141213) 构建与部署均 success。
+- 正式 HTTPS 站点独立 Chrome 390×844 验收通过：从左上默认录入、从右下录入、导出 schemaVersion=4；两条虚构记录分别保留 upper_left / lower_right、用户归类与原入口，均 pending。固定坐标说明存在；断网关闭页面后重新打开，两条记录归属仍正确；页面错误 0。隔离测试资料随上下文关闭移除。

@@ -2,6 +2,8 @@
 
 知不知是静态 PWA，无需应用后端。正式站点：[知不知 · Know-unknown](https://zherlock0213.github.io/Know-unknown/)。
 
+最近发布：应用提交 dbdb17c，[构建与部署](https://github.com/ZHERLOCK0213/Know-unknown/actions/runs/39218141213) 成功。正式站点已验证 schema v4 象限来源导出和离线重开。iPhone 真机更新与旧记录调整仍需设备上验收。
+
 ## GitHub Pages
 
 仓库包含 [.github/workflows/pages.yml](../.github/workflows/pages.yml)。
