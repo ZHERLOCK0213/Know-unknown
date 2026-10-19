@@ -93,7 +93,7 @@ it('现有数据库的知识、感受、待分类与无字段旧记录统一可�
 
 
 it('AI adapter 收到象限上下文；用户改类后的迟到结果不能覆盖', async () => {
-  const repository=repo(); const record=createRecord('来自左上入口的陈述','known_unknown','upper_left');
+  const repository=repo(); const record=createRecord('来自象限二入口的陈述','known_unknown','upper_left');
   await repository.add(record);
   let resolve!: (value:unknown)=>void;
   let captured: unknown;

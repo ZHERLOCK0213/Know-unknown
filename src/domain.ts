@@ -12,20 +12,20 @@ export const quadrantNames: Record<Quadrant, string> = {
   upper_right: '象限一', upper_left: '象限二', lower_left: '象限三', lower_right: '象限四',
 };
 export const quadrantLabels: Record<Quadrant, string> = {
-  upper_left: '象限二 · 左上 · 已知的未知', upper_right: '象限一 · 右上 · 共同认知',
-  lower_left: '象限三 · 左下 · 未知的未知', lower_right: '象限四 · 右下 · 我的记录',
+  upper_left: '象限二 · 已知的未知', upper_right: '象限一 · 共同认知',
+  lower_left: '象限三 · 未知的未知', lower_right: '象限四 · 我的记录',
 };
 export const cognitionContext = {
   axes: { horizontal: { left: '我不知道', right: '我知道' }, vertical: { top: 'AI 知道', bottom: 'AI 不知道' } },
   quadrants: {
-    upper_left: { number: 2, name: quadrantNames.upper_left, position: '左上', label: '已知的未知', userKnowledge: 'unknown', aiKnowledge: 'known' },
-    upper_right: { number: 1, name: quadrantNames.upper_right, position: '右上', label: '共同认知', userKnowledge: 'known', aiKnowledge: 'known' },
-    lower_left: { number: 3, name: quadrantNames.lower_left, position: '左下', label: '未知的未知', userKnowledge: 'unknown', aiKnowledge: 'unknown' },
-    lower_right: { number: 4, name: quadrantNames.lower_right, position: '右下', label: '我的记录', userKnowledge: 'known', aiKnowledge: 'unknown' },
+    upper_left: { number: 2, name: quadrantNames.upper_left, label: '已知的未知', userKnowledge: 'unknown', aiKnowledge: 'known' },
+    upper_right: { number: 1, name: quadrantNames.upper_right, label: '共同认知', userKnowledge: 'known', aiKnowledge: 'known' },
+    lower_left: { number: 3, name: quadrantNames.lower_left, label: '未知的未知', userKnowledge: 'unknown', aiKnowledge: 'unknown' },
+    lower_right: { number: 4, name: quadrantNames.lower_right, label: '我的记录', userKnowledge: 'known', aiKnowledge: 'unknown' },
   },
   meanings: {
     declaredQuadrant: '用户指定的基础象限；可能与文字语义不一致，不能根据内容静默重分类。',
-    quadrant: '导出时的展示象限。个人记录收到模型建议后可进入右上，原有归类和入口仍保留。',
+    quadrant: '导出时的展示象限。个人记录收到模型建议后可进入象限一，原有归类和入口仍保留。',
     source: 'user 表示用户指定；legacy_inferred 表示根据旧字段推定，无法证明原始录入入口。',
     entryPoint: '创建记录时的界面入口；unknown 表示未留存。与用户最终选择的象限分别记录。',
     knowledge: '坐标描述归类意图，不证明用户或模型客观上知道什么；原文是用户自述。',
