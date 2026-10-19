@@ -147,3 +147,7 @@ npm run test:e2e
 - 新增浏览器测试使用相同来源的两份真实生产预缓存，通过更换 HTML 与匹配 revision 产生真实 waiting worker；确认更新前不切换，用户点击后新页面生效，另一窗口未保存草稿仍可保存，已保存的左上/右下记录归属保留，导出 v4，升级后离线重开，页面错误 0。这里的两个测试记录在左上与右下；测试不使用私人原文。
 - 额外隔离回归：从历史提交 474d17f 构建 schema v3，写入虚构记录；切换服务器为 0.1.1，等待新版 worker 就绪，关闭唯一旧页面后重开。记录保留、导出 v4、source=legacy_inferred / entryPoint=unknown，离线重开成功，页面错误 0。未清除缓存或 IndexedDB。
 - 上述证据来自桌面 Chrome；iPhone 主屏幕实际更新仍需用户确认。未接入真实模型。
+
+- 最终改动再次验证：npm test 24 项通过；项目子路径生产构建通过（预缓存约 262 KiB）；浏览器 8 项通过（9.6 秒），git diff --check 通过。
+- 应用提交 bda26a7 已推送，[GitHub Actions 39220057640](https://github.com/ZHERLOCK0213/Know-unknown/actions/runs/39220057640) 终态 success，build 24 秒、deploy 10 秒。
+- 正式 HTTPS 页面 HTTP 200；独立 Chrome 390×844 显示「应用版本 0.1.1」「数据格式 4」，手动检查反馈未发现新版本；左上实际录入并导出 v4，象限及入口均 upper_left。关闭页面、断网新开后版本与记录保留，页面错误 0；已目视检查设置页布局。所有线上测试资料仅存在隔离浏览器本地，关闭上下文后移除。
