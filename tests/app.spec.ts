@@ -1,0 +1,141 @@
+import { test, expect, type Page } from '@playwright/test';
+const appPath = process.env.APP_BASE_PATH || '/';
+async function write(page: Page, text: string, gap = false) {
+  await page.getByRole('button',{name:/04/}).click();
+  if (gap) await page.getByRole('button',{name:'我还不知道',exact:true}).click();
+  await page.getByRole('textbox').fill(text);
+  await page.getByRole('button',{name:'保存到本机',exact:true}).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+}
+test('移动端：离线保存、刷新、只读、跳过、导出、恢复和清空', async ({page,context}) => {
+  const errors: string[] = []; page.on('pageerror',e => errors.push(e.message));
+  await page.goto(appPath); await expect(page.getByRole('heading',{level:1})).toBeVisible();
+  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await write(page,'我喜欢提前看会议议程');
+  await write(page,'我还不会炒鸡蛋',true);
+  await page.getByRole('button',{name:/待理解记录 1/}).click();
+  await page.getByRole('button',{name:'跳过',exact:true}).click();
+  await expect(page.getByText('最近有没有一件你还不明白、想继续探索的事？')).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await context.setOffline(true); await page.reload();
+  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await write(page,'这是一条离线记录');
+  await page.reload();
+  await page.getByRole('button',{name:/待理解记录 2/}).click();
+  await expect(page.getByText('这是一条离线记录',{exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'等待接入模型'}).first()).toBeDisabled();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:/01/}).click();
+  await expect(page.getByText('我还不会炒鸡蛋',{exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button',{name:/导出 JSON/}).click();
+  const download = await downloadEvent; const file = await download.path(); expect(file).toBeTruthy();
+  page.once('dialog',d => d.accept());
+  await page.getByRole('button',{name:'清空本机全部资料'}).click();
+  await expect(page.getByRole('button',{name:'导出 JSON · 0 条'})).toBeVisible();
+  page.once('dialog',d => d.accept());
+  await page.locator('input[type=file]').setInputFiles(file!);
+  await expect(page.getByRole('button',{name:'导出 JSON · 3 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click(); await page.reload();
+  await page.getByRole('button',{name:/待理解记录 2/}).click();
+  await expect(page.getByText('最近有没有一件你还不明白、想继续探索的事？')).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  await page.screenshot({path:'docs/mobile-preview.png',fullPage:true});
+  await context.setOffline(false);
+});
+test('失败保留输入；坏归档不覆盖；右上确认与退回', async ({page}) => {
+  await page.goto(appPath); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  // Force a real transaction-open failure, then verify input remains visible.
+  await page.evaluate(() => { IDBDatabase.prototype.transaction = () => { throw new Error('模拟存储不可用'); }; });
+  await page.getByRole('button',{name:/04/}).click(); await page.getByRole('textbox').fill('不能丢掉的草稿');
+  await page.getByRole('button',{name:'保存到本机'}).click();
+  await expect(page.getByRole('alert')).toContainText('模拟存储不可用');
+  await expect(page.getByRole('textbox')).toHaveValue('不能丢掉的草稿');
+  page.once('dialog',d => d.accept()); await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.reload(); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await write(page,'原始文字');
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  await page.locator('input[type=file]').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{"schemaVersion":99}')});
+  await expect(page.getByRole('alert')).toContainText('不支持');
+  await expect(page.getByRole('button',{name:'导出 JSON · 1 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  // Seed model evidence only in the test, never expose a fake model in production.
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve,reject) => {const r=indexedDB.open('cognitive-quadrants-v1',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');const store=tx.objectStore('records');const r=store.getAll();r.onsuccess=()=>{const record=r.result[0];store.put({...record,status:'understood',revision:crypto.randomUUID(),analysis:{summary:'仅测试用理解',provider:'test',model:'fake',generatedAt:new Date().toISOString()}});};tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
+  });
+  await page.reload(); await page.getByRole('button',{name:/02/}).click();
+  await expect(page.getByText('仅测试用理解',{exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await page.getByRole('button',{name:'确认这次理解'}).click(); await expect(page.getByText('已确认',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'撤回确认'}).click(); await expect(page.getByText('共同认知，慢慢形成')).toBeVisible();
+});
+test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆盖', async ({page}) => {
+  await page.goto(`${appPath}?category=feeling`);
+  await expect(page.getByRole('heading',{level:1})).toHaveText('知不知');
+  await expect(page.getByRole('navigation')).toHaveCount(0);
+  for (const [width,height,zoom] of [[360,640,1],[390,844,1],[1280,844,1],[1280,600,1],[1280,844,1.5],[1280,844,2]]) {
+    await page.setViewportSize({width,height});
+    await page.evaluate(scale => {document.documentElement.style.zoom=String(scale);},zoom);
+    const geometry = await page.evaluate(() => {
+      const rect = (element: Element) => {const r=element.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+      const cards = [...document.querySelectorAll('.quadrant')].map(rect);
+      const labels = [...document.querySelectorAll('.vertical-label,.horizontal-labels span,.below-map')].map(rect);
+      const v=rect(document.querySelector('.vertical-axis')!); const h=rect(document.querySelector('.horizontal-axis')!);
+      const overlaps = cards.some(c=>labels.some(l=>c.left<l.right-.5 && c.right>l.left+.5 && c.top<l.bottom-.5 && c.bottom>l.top+.5));
+      const contentOverflow = [...document.querySelectorAll('.quadrant')].some(card=>{const c=card.getBoundingClientRect();return [...card.children].some(child=>child.getBoundingClientRect().bottom>c.bottom+1);});
+      return {overlaps,contentOverflow,v,h,minX:Math.min(...cards.map(r=>r.left)),maxX:Math.max(...cards.map(r=>r.right)),minY:Math.min(...cards.map(r=>r.top)),maxY:Math.max(...cards.map(r=>r.bottom)),topBottom:cards[0].bottom,bottomTop:cards[2].top,overflow:document.documentElement.scrollWidth>innerWidth};
+    });
+    expect(geometry.overlaps,`${width}x${height} @${zoom} 标注遮挡`).toBe(false);
+    expect(geometry.contentOverflow,'卡片内容溢出').toBe(false);
+    expect(geometry.overflow).toBe(false);
+    expect(geometry.v.height).toBeGreaterThan(geometry.h.width);
+    expect(geometry.v.top).toBeLessThan(geometry.minY-10);
+    expect(geometry.v.bottom).toBeGreaterThan(geometry.maxY+10);
+    expect(geometry.h.left).toBeLessThan(geometry.minX-5);
+    expect(geometry.h.right).toBeGreaterThan(geometry.maxX+5);
+    expect(geometry.h.top).toBeGreaterThan(geometry.topBottom);
+    expect(geometry.h.bottom).toBeLessThan(geometry.bottomTop);
+  }
+  await page.evaluate(()=>{document.documentElement.style.zoom='1';});
+  await page.setViewportSize({width:1280,height:844});
+  await page.screenshot({path:'docs/desktop-preview.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'docs/mobile-preview.png',fullPage:true});
+});
+
+for (const version of [1,2]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
+  await page.goto(appPath); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  const stamp=new Date().toISOString();
+  const records=['knowledge','feeling','unclassified'].map((category,i)=>({id:`legacy-${i}`,revision:`legacy-rev-${i}`,text:`旧${category}记录`,kind:'personal',status:'pending',createdAt:stamp,updatedAt:stamp,...(version===2?{category}:{})}));
+  const legacy={schemaVersion:version,exportedAt:stamp,records,skippedQuestionIds:[]};
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles({name:'legacy.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(legacy))});
+  await expect(page.getByRole('button',{name:'导出 JSON · 3 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(page.getByRole('button',{name:/待分类/})).toHaveCount(0);
+  await page.getByRole('button',{name:/待理解记录 3/}).click();
+  for (const record of records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:/归入/})).toHaveCount(0);
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.evaluate(async()=>{await navigator.serviceWorker.ready;}); await context.setOffline(true);
+  await page.reload(); await write(page,'无需分类的新记录');
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  const downloading=page.waitForEvent('download'); await page.getByRole('button',{name:/导出 JSON/}).click(); const file=await(await downloading).path();
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'清空本机全部资料'}).click();
+  await expect(page.getByRole('button',{name:'导出 JSON · 0 条'})).toBeVisible();
+  page.once('dialog',d=>d.accept());await page.locator('input[type=file]').setInputFiles(file!);
+  await expect(page.getByRole('button',{name:'导出 JSON · 4 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click(); await page.reload();
+  await page.getByRole('button',{name:/待理解记录 4/}).click();
+  await expect(page.getByText('无需分类的新记录',{exact:true})).toBeVisible();
+  for (const record of records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
+});
