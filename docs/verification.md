@@ -163,3 +163,6 @@ npm run test:e2e
 - APP_BASE_PATH=/Know-unknown/ npm run test:e2e：9 项通过（10.2 秒）。新增全量列表覆盖 pending / understood / confirmed、移到左上不消失、确认后不消失、撤回后不消失、离线重开与导出 id 不丢失。先前左上入口用例也改为直接在同一全量列表内移入移出。
 - 几何验收覆盖 360/390px 手机、桌面、短屏及 150%/200% CSS 放大；卡片编号与 font-weight=700 已校验。已目视检查本次手机与桌面截图，轴线、标注与底部入口没有重叠。
 - 浏览器的理解建议是明确标记的 test/fake 证据，仅验证列表与状态操作，未联通真实模型。私人导出文件未写入仓库、截图或测试；iPhone 真机更新待用户验收。
+
+- 应用提交 e63b2ac 已推送，[GitHub Actions 39221414858](https://github.com/ZHERLOCK0213/Know-unknown/actions/runs/39221414858) 终态 success：build 19 秒、deploy 18 秒。
+- 正式站独立 Chrome 390×844 验收通过：HTTP 200、版本 0.1.2、四个编号及 700 字重正确；虚构记录从右下创建，在「全部记录」移到左上后仍显示于原列表，计数不变。导出保存 upper_left 与原入口 lower_right，固定编号存在；断网关闭页面后重开仍可在全量列表读取，页面错误 0。测试资料仅在隔离浏览器本地，关闭后移除。iPhone 真机仍待用户验收。
