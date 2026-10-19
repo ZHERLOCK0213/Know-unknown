@@ -105,4 +105,8 @@ npm run test:e2e
 - 29 个应用项目文件已复制至该克隆并逐字节核对，保留 .git 与原仓库历史；未复制 node_modules、dist、work、登录配置或私人记录。
 - 在新克隆执行 npm ci --prefer-offline --no-audit --no-fund 成功；npm test 为 2 文件 17 项通过；APP_BASE_PATH=/Know-unknown/ npm run build 的 TypeScript、Vite 与 PWA 生成通过，静态预缓存约 255 KiB。此前 5 项浏览器验收证据仍来自原目录，不冒充在新克隆重复运行。
 - 私有仓库创建 Pages 返回 HTTP 422：当前套餐不支持。用户明确授权 Public 并发布后，可见性修改成功，创建 Pages 成功（public=true，build_type=workflow），目标网址为 https://zherlock0213.github.io/Know-unknown/。
-- 当前待提交、推送和首次远端 CI；尚未宣称公网验证或 iPhone 真机通过。
+- 应用提交 30c4b35 已推送 main，保留原 ee1202b 历史。[GitHub Actions 39197009642](https://github.com/ZHERLOCK0213/Know-unknown/actions/runs/39197009642) 终态 success：build 15 秒、deploy 13 秒；单元测试、构建与 Pages 发布步骤全部通过。
+- 正式网址 https://zherlock0213.github.io/Know-unknown/ 可访问。首页、manifest.webmanifest、icon-192.png、icon-512.png、sw.js 均 HTTP 200；标题与 Manifest 名称正确，start_url/scope 为 /Know-unknown/。
+- 在真实 HTTPS 正式站，独立 Chrome 上下文 390×844：联网缓存后关闭页面，断网新开；新建并保存测试记录，再关闭重开后可读；记录仍在待理解，接入模型按钮禁用，页面错误 0。Service Worker scope 为正式项目网址。测试数据只在隔离浏览器本地，关闭上下文后移除。
+- 线上脚本首轮因保存提示匹配到了页面和隐藏弹窗两处而中止；修正为等待弹窗关闭与记录计数后通过，未修改生产代码。未将这次定位失败描述为产品故障或忽略它。
+- iPhone Safari 添加主屏幕、真机飞行模式、系统字号与读屏仍需用户验收。未接入真实模型。
