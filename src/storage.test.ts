@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import { IndexedDBRepository } from './storage';
-import { createRecord, confirmRecord, makeArchive, resetRecord, withAnalysis } from './domain';
+import { createRecord, confirmRecord, makeArchive, resetRecord, reclassifyRecord, withAnalysis } from './domain';
 import { AIService, NoAIAdapter, type AIAdapter } from './ai';
 const analysis = {summary:'理解建议',provider:'test',model:'fake',generatedAt:new Date().toISOString()};
 const repo = () => new IndexedDBRepository(`test-${crypto.randomUUID()}`);
@@ -82,11 +82,25 @@ it('现有数据库的知识、感受、待分类与无字段旧记录统一可�
     {...createRecord('旧未分类', 'personal'),category:'unclassified'},
     createRecord('最初的记录', 'personal'),
   ];
-  await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');rows.forEach(row=>tx.objectStore('records').add(row));tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
+  await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');rows.forEach(row=>{const {placement:_placement,quadrant:_quadrant,...legacy}=row;tx.objectStore('records').add(legacy);});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
   const restored = await new IndexedDBRepository(name).read();
   expect(restored.records).toHaveLength(4);
   expect(restored.records.find(r=>r.text==='旧感受')).toMatchObject({status:'confirmed',analysis});
-  expect(restored.records.every(r=>!('category' in r))).toBe(true);
+  expect(restored.records.every(r=>!('category' in r) && r.placement.source==='legacy_inferred' && r.placement.entryPoint==='unknown')).toBe(true);
   await repository.replace(restored);
   expect((await repository.read()).records.map(r=>r.text).sort()).toEqual(rows.map(r=>r.text).sort());
+});
+
+
+it('AI adapter 收到象限上下文；用户改类后的迟到结果不能覆盖', async () => {
+  const repository=repo(); const record=createRecord('来自左上入口的陈述','known_unknown','upper_left');
+  await repository.add(record);
+  let resolve!: (value:unknown)=>void;
+  let captured: unknown;
+  const service=new AIService(repository,{available:true,analyze:input=>{captured=input;return new Promise(r=>{resolve=r;});}});
+  const pending=service.understand(record,new AbortController().signal);
+  expect(captured).toMatchObject({schemaVersion:4,record:{quadrant:'upper_left',placement:{declaredQuadrant:'upper_left',entryPoint:'upper_left',source:'user'}},cognitionContext:{quadrants:{upper_left:{label:'已知的未知'}}}});
+  await repository.update(record.id,current=>reclassifyRecord(current,'personal'),record.revision);
+  resolve(analysis); await expect(pending).rejects.toThrow();
+  expect((await repository.read()).records[0]).toMatchObject({status:'pending',quadrant:'lower_right',text:record.text});
 });

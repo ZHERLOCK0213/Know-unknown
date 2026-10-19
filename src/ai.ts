@@ -1,8 +1,8 @@
-import { withAnalysis, type CognitiveRecord } from './domain';
+import { makeAIInput, withAnalysis, type AIInput, type CognitiveRecord } from './domain';
 import type { Repository } from './storage';
 export interface AIAdapter {
   readonly available: boolean;
-  analyze(record: Readonly<CognitiveRecord>, signal: AbortSignal): Promise<unknown | null>;
+  analyze(input: Readonly<AIInput>, signal: AbortSignal): Promise<unknown | null>;
 }
 export class NoAIAdapter implements AIAdapter {
   readonly available = false;
@@ -13,7 +13,7 @@ export class AIService {
   async understand(record: CognitiveRecord, signal: AbortSignal): Promise<boolean> {
     if (record.status !== 'pending') throw new Error('记录不在待理解状态');
     if (signal.aborted) throw new Error('已取消理解');
-    const result = await this.adapter.analyze(structuredClone(record), signal);
+    const result = await this.adapter.analyze(makeAIInput(record), signal);
     if (signal.aborted) throw new Error('已取消理解');
     if (result === null) return false;
     await this.repository.update(record.id, current => withAnalysis(current, result), record.revision);

@@ -24,7 +24,7 @@ npm ci
 npm test
 APP_BASE_PATH=/Know-unknown/ npm run build
 APP_BASE_PATH=/Know-unknown/ npm run test:e2e
-npm run preview -- --port 4173
+APP_BASE_PATH=/Know-unknown/ npm run preview -- --port 4173
 ```
 
 访问 `http://127.0.0.1:4173/Know-unknown/`。浏览器验收默认使用本机 Google Chrome。

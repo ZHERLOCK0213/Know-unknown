@@ -37,7 +37,7 @@ export class IndexedDBRepository implements Repository {
       const records = tx.objectStore('records').getAll();
       const skipped = tx.objectStore('meta').get('skipped');
       skipped.onsuccess = () => {
-        try { result(makeArchive(records.result.map(row => parseRecord(row)), skipped.result ?? [])); } catch (error) { fail(error as Error); }
+        try { result(makeArchive(records.result.map(row => parseRecord(row, true)), skipped.result ?? [])); } catch (error) { fail(error as Error); }
       };
     });
   }
@@ -55,7 +55,7 @@ export class IndexedDBRepository implements Repository {
       request.onsuccess = () => {
         try {
           if (!request.result) throw new Error('这条记录已被删除');
-          const current = parseRecord(request.result);
+          const current = parseRecord(request.result, true);
           if (expectedRevision && current.revision !== expectedRevision) throw new Error('记录已变化，请重新发起理解');
           const next = parseRecord(change(current));
           if (next.id !== id) throw new Error('记录标识不可变');

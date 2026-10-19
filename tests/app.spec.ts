@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 const appPath = process.env.APP_BASE_PATH || '/';
 async function write(page: Page, text: string, gap = false) {
   await page.getByRole('button',{name:/04/}).click();
@@ -69,7 +70,7 @@ test('失败保留输入；坏归档不覆盖；右上确认与退回', async ({
   // Seed model evidence only in the test, never expose a fake model in production.
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve,reject) => {const r=indexedDB.open('cognitive-quadrants-v1',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
-    await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');const store=tx.objectStore('records');const r=store.getAll();r.onsuccess=()=>{const record=r.result[0];store.put({...record,status:'understood',revision:crypto.randomUUID(),analysis:{summary:'仅测试用理解',provider:'test',model:'fake',generatedAt:new Date().toISOString()}});};tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
+    await new Promise<void>((resolve,reject) => {const tx=db.transaction('records','readwrite');const store=tx.objectStore('records');const r=store.getAll();r.onsuccess=()=>{const record=r.result[0];store.put({...record,status:'understood',quadrant:'upper_right',revision:crypto.randomUUID(),analysis:{summary:'仅测试用理解',provider:'test',model:'fake',generatedAt:new Date().toISOString()}});};tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();
   });
   await page.reload(); await page.getByRole('button',{name:/02/}).click();
   await expect(page.getByText('仅测试用理解',{exact:true})).toBeVisible();
@@ -106,12 +107,14 @@ test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆�
   }
   await page.evaluate(()=>{document.documentElement.style.zoom='1';});
   await page.setViewportSize({width:1280,height:844});
+  await page.reload(); await expect(page.getByRole('heading',{level:1})).toBeVisible();
   await page.screenshot({path:'docs/desktop-preview.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
+  await page.reload(); await expect(page.getByRole('heading',{level:1})).toBeVisible();
   await page.screenshot({path:'docs/mobile-preview.png',fullPage:true});
 });
 
-for (const version of [1,2]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
+for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
   await page.goto(appPath); await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
   const stamp=new Date().toISOString();
   const records=['knowledge','feeling','unclassified'].map((category,i)=>({id:`legacy-${i}`,revision:`legacy-rev-${i}`,text:`旧${category}记录`,kind:'personal',status:'pending',createdAt:stamp,updatedAt:stamp,...(version===2?{category}:{})}));
@@ -138,4 +141,49 @@ for (const version of [1,2]) test(`v${version} 旧记录合并、离线保存及
   await page.getByRole('button',{name:/待理解记录 4/}).click();
   await expect(page.getByText('无需分类的新记录',{exact:true})).toBeVisible();
   for (const record of records) await expect(page.getByText(record.text,{exact:true})).toBeVisible();
+});
+
+
+test('左上录入继承象限，JSON 保留来源，用户可调整并离线恢复', async ({page,context}) => {
+  await page.goto(appPath);
+  await expect(page.getByRole('button',{name:/04/})).toBeEnabled();
+  await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
+  await page.getByRole('button',{name:/01/}).click();
+  await page.getByRole('button',{name:'记一笔',exact:true}).click();
+  await expect(page.getByRole('button',{name:'我还不知道',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByText(/保存到：左上/)).toBeVisible();
+  await page.getByRole('textbox').fill('这是一个我指定放在左上的陈述');
+  await page.getByRole('button',{name:'保存到本机',exact:true}).click();
+  await expect(page.getByRole('button',{name:/01/})).toContainText('1 条探索');
+  await expect(page.getByRole('button',{name:/待理解记录 0/})).toBeVisible();
+  await write(page,'这是来自右下的记录');
+  await page.getByRole('button',{name:/待理解记录 1/}).click();
+  await page.getByRole('button',{name:'移到左上',exact:true}).click();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:/01/}).click();
+  const moved=page.locator('article').filter({hasText:'这是来自右下的记录'});
+  await moved.getByRole('button',{name:'移到右下',exact:true}).click();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  const downloading=page.waitForEvent('download');
+  await page.getByRole('button',{name:/导出 JSON/}).click();
+  const file=await(await downloading).path();
+  const archive=JSON.parse(await readFile(file!,'utf8'));
+  expect(archive.schemaVersion).toBe(4);
+  expect(archive.cognitionContext.quadrants.upper_left).toMatchObject({position:'左上',label:'已知的未知'});
+  expect(archive.records.find((r:{text:string})=>r.text==='这是一个我指定放在左上的陈述')).toMatchObject({quadrant:'upper_left',status:'pending',placement:{declaredQuadrant:'upper_left',source:'user',entryPoint:'upper_left'}});
+  expect(archive.records.find((r:{text:string})=>r.text==='这是来自右下的记录')).toMatchObject({quadrant:'lower_right',placement:{declaredQuadrant:'lower_right',source:'user',entryPoint:'lower_right'}});
+  // Invalid v4 metadata must not replace good local records.
+  const invalid=structuredClone(archive);invalid.records[0].quadrant='lower_left';
+  await page.locator('input[type=file]').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(invalid))});
+  await expect(page.getByRole('alert')).toContainText('象限');
+  await expect(page.getByRole('button',{name:'导出 JSON · 2 条'})).toBeVisible();
+  page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles(file!);
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await context.setOffline(true);await page.reload();
+  await expect(page.getByRole('button',{name:/01/})).toContainText('1 条探索');
+  await expect(page.getByRole('button',{name:/待理解记录 1/})).toBeVisible();
+  await page.getByRole('button',{name:/01/}).click();
+  await expect(page.getByText('这是一个我指定放在左上的陈述',{exact:true})).toBeVisible();
 });

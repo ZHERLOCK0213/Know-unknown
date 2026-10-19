@@ -119,3 +119,15 @@ npm run test:e2e
 - deployment.md 改为可复用的发布、路径配置和发布后验收指南，去除特定账号的授权过程和本机工作目录。
 - 两份文档的仓库内相对链接均存在，git diff --check 通过；npm test 为 2 文件 17 项通过，npm run build 的类型检查、Vite 和 PWA 生成通过。
 - 本轮仅修改文档，未改应用逻辑；未重复浏览器验收，未新增 iPhone 真机或模型验证结论。
+
+## 象限归属、录入来源与 AI 上下文
+
+日期：2026-10-19。
+
+- 修复左上列表「记一笔」默认跳回 personal 的问题：现在继承 known_unknown，编辑器显示目标象限；用户可主动切换。待理解条目可移动到左上/右下，保留原文并更新 revision。
+- schema v4 增加明确 quadrant、placement.declaredQuadrant/source/entryPoint 与固定 cognitionContext。展示迁移与用户基础归类分开；AIInput 使用同一说明。v4 缺失、矛盾或伪造入口的信息被拒绝；导入的自定义语义说明不会替换应用标准定义。
+- v1/v2/v3 归档及原数据库均兼容。保留原文、时间、id、状态与模型证据；无法还原的旧入口明确 unknown，source=legacy_inferred。未自动根据用户的私人记录文本纠正分类。
+- 最终 npm test：2 文件 24 项通过，覆盖旧格式兼容、明确象限、模型输入上下文、主动改类及迟到结果保护。APP_BASE_PATH=/Know-unknown/ npm run build：类型检查、Vite 与 PWA 生成通过，预缓存约 259 KiB。
+- APP_BASE_PATH=/Know-unknown/ npm run test:e2e：7 项通过（6.3 秒）。包含从左上实际录入、保存目标、手动移动、导出字段、坏 v4 归档不覆盖、v1/v2/v3 恢复与离线重开，以及原有状态、存储失败和坐标几何场景。
+- 独立新浏览器 390×844 复核：main/header 均只有一个，底部状态与卡片不重叠；左上录入默认按钮 aria-pressed=true，保存目标为左上。缩放后截图在重置视口并重新加载后采集，已目视检查手机截图。
+- 个人原文未复制到仓库或测试。模型接口验证仍是 fake adapter，不代表真实模型联通；本轮没有云服务、Markdown 记忆存储或对话分析写回。iPhone 真机更新和调整旧记录仍待用户验收。

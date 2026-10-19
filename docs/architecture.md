@@ -6,7 +6,7 @@
 
 采用用户确认的「方案 B 动态认知状态底层逻辑 + 方案 A 极简交互」。打开即四象限；横轴左我不知道、右我知道；纵轴上 AI 知道、下 AI 不知道。只讨论已进入个人记录范围的信息，不展示模型的整个知识库。
 
-目标：3 次操作内离线记录；严格区分落盘、模型理解建议与用户确认；随时导出、恢复和删除个人数据。右下是唯一记录入口，可选择「我知道 / 我还不知道」；知识、感受与经历统一输入，后者明确声明已知未知。右上、左上内容只读，确认/退回是状态动作，不允许静默修改原文。左下不生成虚假的未知条目。问题可跳过，回答使用同一个记录入口。
+目标：3 次操作内离线记录；严格区分落盘、模型理解建议与用户确认；随时导出、恢复和删除个人数据。右下为快速记录入口；左上列表中的「记一笔」默认继承左上归类。编辑器可选择「我知道 / 我还不知道」；知识、感受与经历统一输入，后者明确声明已知未知。右上、左上内容只读，确认/退回是状态动作，不允许静默修改原文。左下不生成虚假的未知条目。问题可跳过，回答使用同一个记录入口。
 
 2026-10-19 首页交互调整（用户明确要求）：横纵轴连续实线，纵轴长于横轴，按手机竖屏布局；去掉顶部引导文案及底部口号。问题提示移入待理解记录，首页只保留四象限与必要操作。
 
@@ -35,7 +35,7 @@ React + TypeScript + Vite；浏览器 IndexedDB；轻量自制仓储接口；vit
 
 ## ADR-003 状态机与四象限投影
 
-记录具有独立的 kind 与认知状态，不持久化象限编号；象限由状态投影。不会用布尔 aiKnows 冒充认知证明。
+记录分别持久化用户归类、录入入口和认知状态。展示象限仍按 kind 与状态投影，但同时显式保存并校验 quadrant，便于导出和 AI 阅读；不能仅靠原文推断归类，也不能用坐标或布尔 aiKnows 冒充认知证明。
 
 ```mermaid
 stateDiagram-v2
@@ -57,14 +57,14 @@ stateDiagram-v2
 
 ## ADR-004 数据结构与约束
 
-详见 src/domain.ts 的可执行类型与校验。当前导出格式 schemaVersion=3，兼容读取 v1/v2；旧库中的知识、感受、待分类及缺失分类字段记录统一归一化，不再区分类别：
+详见 src/domain.ts 的可执行类型与校验。当前导出格式 schemaVersion=4，兼容读取 v1/v2/v3；旧库中的知识、感受、待分类及缺失分类字段记录统一归一化，不再区分类别：
 
-- Record：id、revision（每次变更的随机版本标记）、kind（personal/known_unknown）、text、status、createdAt、updatedAt、可选 analysis。
+- Record：id、revision（每次变更的随机版本标记）、kind（personal/known_unknown）、text、status、createdAt、updatedAt、可选 analysis、quadrant（展示象限）、placement（declaredQuadrant、source、entryPoint）。
 - Analysis：summary、provider、model、generatedAt、可选 question；这是模型推断，原文始终不被覆盖。known_unknown 的 summary 是相关知识建议。
 - Question：由记录中的 analysis.question 派生；无模型仅使用稳定 id 的本地通用提示；跳过 id 持久化，回答保存为新记录并跳过原问题。
-- Archive：schemaVersion、exportedAt、records、skippedQuestionIds。无 Key、设备标识或隐藏模型设置。
+- Archive：schemaVersion、cognitionContext（坐标、象限名称、归类意图与认知状态含义）、exportedAt、records、skippedQuestionIds。无 Key、设备标识或隐藏模型设置。
 
-不采用事件溯源。导出/恢复与每次字段变更都进行运行时校验；除 v1/v2→v3 明确兼容路径外，未知版本拒绝。v2 归档先验证旧 category 有效，再移除这一字段；v3 不包含分类。导入是原子替换，UI 明确二次确认；失败不改变原档案；10MB 文件上限。重复 id、非法状态、无证据的 confirmed 都拒绝。模型内容只能以 React 纯文本展示，不渲染 HTML。
+不采用事件溯源。导出/恢复与每次字段变更都进行运行时校验；除 v1/v2/v3→v4 明确兼容路径外，未知版本拒绝。v2 归档先验证旧 category 有效，再移除这一字段；v3/v4 不包含知识/感受分类。v4 必须包含完整且一致的记录象限信息；旧格式仅从旧字段推定，不能伪造用户操作证据。导入是原子替换，UI 明确二次确认；失败不改变原档案；10MB 文件上限。重复 id、非法状态、无证据的 confirmed 都拒绝。模型内容只能以 React 纯文本展示，不渲染 HTML。
 
 ## ADR-005 存储层、隐私与可迁移性
 
@@ -76,7 +76,7 @@ Repository.read / add / update / skip / replace / clear 提供事务边界。Ind
 
 ## ADR-006 AI adapter 与信任边界
 
-AIAdapter.analyze(record, signal) → Analysis | null。NoAIAdapter 是运行时默认实现，返回 null、不发请求。AIService 仅接受有效结果；错误不改变 pending；只给选中的一条原文，不默认发送所有记忆。
+AIAdapter.analyze({schemaVersion, cognitionContext, record}, signal) → Analysis | null。NoAIAdapter 是运行时默认实现，返回 null、不发请求。AIService 仅接受有效结果；错误不改变 pending；输入包含选中的一条原文、象限与状态证据以及固定坐标说明，不默认发送所有记忆。
 
 本轮实现 NoAIAdapter、服务编排边界和测试用 fake adapter。**不实现真实远程模型、不实现本地推理，界面也不收集 Key**。模型不可用时理解按钮禁用；不能用规则或回声摘要标记 understood。
 
@@ -111,7 +111,7 @@ src/App.tsx + styles.css    四象限、记录、只读浏览、数据设置
 - 标题现为「知不知 / Know-unknown」（原型阶段为「你和AI的认知四象限」），没有分类导航、分类控件或待分类入口。
 - 新记录没有 category 字段。所有已保存记录按 kind 与认知状态投影到同一个四象限，不以知识/感受过滤。
 - 原有数据库名与对象仓库保持不变，读取所有旧记录并规范化；保留原文、id、revision、时间、状态、模型建议、来源和用户确认。读取不会清空或重建数据库。
-- 新归档为 schemaVersion=3。v1/v2 归档在完整校验后统一恢复，v2 的旧分类元数据在规范化后不再使用，不丢弃任何记录。已有本地提示的跳过状态从旧 id 映射到统一 id；模型问题保留原标识和来源。
+- 合并分类阶段使用 schemaVersion=3；现由 v4 补充明确象限与来源。v1/v2/v3 归档在完整校验后统一恢复，v2 的旧分类元数据在规范化后不再使用，不丢弃任何记录。已有本地提示的跳过状态从旧 id 映射到统一 id；模型问题保留原标识和来源。
 - 保存、AI 理解建议与用户确认仍严格区分。通用知识不是关于用户的事实，感受也不能被推断为客观能力；统一展示不自动认可任何模型推断。
 - 当前仍只有 NoAIAdapter，默认只传选中的原文给未来 adapter；合并界面不等于实现了模型长期记忆或跨记录推理，也不授权自动上传整个数据库。
 
@@ -136,3 +136,14 @@ src/App.tsx + styles.css    四象限、记录、只读浏览、数据设置
 - main 推送及手动 workflow_dispatch 触发部署。需要用户仓库权限和 Pages 的 GitHub Actions Source；私有仓库的 Pages 资格以账号实际设置为准，不能擅自公开源码。
 - 不向先前未发布的 Sites 站点继续上传；旧工作目录在 work/ 中，Git 忽略。目标已切换为用户指定的 GitHub 仓库。
 - 当前仅为静态离线记录工具，GitHub Pages 不提供 Codex 订阅推理或后端。AI 接入是后续独立任务。
+
+
+## ADR-012 · 用户象限意图与 AI 阅读上下文
+
+- 用户指定象限是独立事实。内容即使与象限定义不完全相符，也保留用户选择，AI 可以提出疑问但不能按语义静默改类。
+- quadrant 表示当前展示位置；placement.declaredQuadrant 表示用户指定的基础象限；placement.entryPoint 表示创建记录时的入口。三者不能互相冒充。例如从左上开始、手动选择「我知道」，入口仍是 upper_left，归类和当前展示为 lower_right。
+- source=user 是用户新建或主动调整的归类；source=legacy_inferred 是根据旧 kind/status 推定。旧导出没有记录真实入口，迁移时保留 unknown。用户明确调整后可更新归类来源，但原入口仍未知。
+- 新建、保存、导出、恢复与状态迁移均运行时校验：kind、展示象限、基础归类和认知证据必须一致。模型建议到达可让 personal 从右下展示到右上，保留 declaredQuadrant 和 entryPoint；撤回后回到基础展示位置。
+- 左上列表「记一笔」默认 known_unknown，右下默认 personal；编辑器显示保存目标，用户可主动切换。待理解条目提供移动到左上/右下的操作，保留原文，生成新 revision，阻止迟到结果覆盖。
+- 归档 schema v4 的 cognitionContext 包含四象限的中文名称、位置、双轴和状态含义。导入时使用应用的标准说明，不能将文件提供的任意说明当作系统指令。AIInput 与归档使用相同描述。
+- 详细格式、兼容边界及未来 Markdown 投影见 archive-format.md。本轮没有云存储、Markdown 自动持久化、真实模型或对话结果写回；不将用户真实记录放入测试或公开仓库。
