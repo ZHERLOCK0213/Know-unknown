@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmRecord, createRecord, makeArchive, nextQuestion, parseArchive, parseAnalysis, parseRecord, reclassifyRecord, makeAIInput, cognitionContext, quadrant, resetRecord, withAnalysis } from './domain';
+import { confirmRecord, createRecord, makeArchive, nextQuestion, parseArchive, parseAnalysis, parseRecord, reclassifyRecord, makeAIInput, cognitionContext, quadrant, resetRecord, editRecord, reviseUnderstanding, withAnalysis } from './domain';
 const analysis = { summary: '你偏好有明确议程的会议。', provider: 'test', model: 'fake', generatedAt: new Date().toISOString(), question: '哪些会议例外？' };
 describe('认知状态与信任边界', () => {
   it('保存与 AI 理解分开；不能从保存直接确认', () => {
@@ -53,7 +53,7 @@ describe('知识与感受合并兼容', () => {
     const pending = createRecord('曾经未分类', 'personal');
     const old = {schemaVersion:2,exportedAt:new Date().toISOString(),records:[{...base,category:'knowledge'},{...feeling,category:'feeling'},{...pending,category:'unclassified'}],skippedQuestionIds:[]};
     const result = parseArchive(old);
-    expect(result.schemaVersion).toBe(4); expect(result.records.map(r=>r.text)).toEqual([base,feeling,pending].map(r=>r.text));
+    expect(result.schemaVersion).toBe(5); expect(result.records.map(r=>r.text)).toEqual([base,feeling,pending].map(r=>r.text));
     expect(result.records.every(r=>r.placement.source==='legacy_inferred' && r.placement.entryPoint==='unknown')).toBe(true);
     expect(result.records[1]).toMatchObject({status:'confirmed',analysis:feeling.analysis,quadrant:'upper_right'});
     expect(JSON.stringify(result)).not.toContain('category');
@@ -84,7 +84,7 @@ describe('明确象限、录入来源与认知证据分别保存', () => {
     const input = makeAIInput(record);
     expect(input.record).toMatchObject({quadrant:'upper_left',status:'pending',placement:{declaredQuadrant:'upper_left',source:'user',entryPoint:'upper_left'}});
     expect(input.cognitionContext.axes.horizontal.left).toBe('我不知道');
-    expect(input.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',label:'已知的未知'});
+    expect(input.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',label:'知道自己不知道的事'});
     expect(input.cognitionContext.quadrants.upper_right).toMatchObject({number:1,name:'象限一'});
     expect(input.cognitionContext.quadrants.lower_left).toMatchObject({number:3,name:'象限三'});
     expect(input.cognitionContext.quadrants.lower_right).toMatchObject({number:4,name:'象限四'});
@@ -118,5 +118,49 @@ describe('明确象限、录入来源与认知证据分别保存', () => {
     const changed=reclassifyRecord(understood,'known_unknown');
     expect(changed.analysis).toBeUndefined(); expect(changed.status).toBe('pending');
     expect(changed.placement.entryPoint).toBe('lower_right');
+  });
+});
+
+
+describe('修改原文会使既有理解失效', () => {
+  it.each(['understood','confirmed'] as const)('%s 修改后回到待理解，保留原记录身份与入口', status => {
+    const original=withAnalysis(createRecord('旧原文','personal'),analysis);
+    const current=status==='confirmed'?confirmRecord(original):original;
+    const edited=editRecord(current,' 新原文 ');
+    expect(edited).toMatchObject({id:current.id,text:'新原文',status:'pending',quadrant:'lower_right',placement:current.placement,createdAt:current.createdAt});
+    expect(edited.analysis).toBeUndefined();expect(edited.revision).not.toBe(current.revision);
+    expect(editRecord(current,'旧原文')).toBe(current);
+  });
+  it('象限二编辑保留归类；拒绝空白与超长原文', () => {
+    const record=createRecord('原困惑','known_unknown');
+    expect(editRecord(record,'新困惑')).toMatchObject({quadrant:'upper_left',kind:'known_unknown',status:'pending'});
+    expect(()=>editRecord(record,'  ')).toThrow();expect(()=>editRecord(record,'a'.repeat(4001))).toThrow();
+  });
+});
+
+
+describe('AI 原建议与用户修订分开', () => {
+  it('修订不改用户原文或模型原建议；撤销旧确认，仍在象限一等待确认', () => {
+    const record=confirmRecord(withAnalysis(createRecord('用户原文','personal'),analysis));
+    const revised=reviseUnderstanding(record,'更准确的理解');
+    expect(revised).toMatchObject({id:record.id,text:record.text,status:'understood',quadrant:'upper_right',placement:record.placement,analysis:{...analysis,userRevision:{summary:'更准确的理解'}}});
+    expect(revised.revision).not.toBe(record.revision);expect(revised.analysis?.userRevision?.editedAt).toMatch(/^\d{4}-/);
+    expect(confirmRecord(revised).analysis?.userRevision?.summary).toBe('更准确的理解');
+    expect(parseArchive(makeArchive([revised],[])).records[0]).toEqual(revised);
+    expect(reviseUnderstanding(revised,'更准确的理解')).toBe(revised);
+  });
+  it('模型响应不能伪造用户修订，无模型反馈不能直接修订', () => {
+    const record=createRecord('用户原文','personal');
+    expect(()=>reviseUnderstanding(record,'没有模型来源的内容')).toThrow();
+    const forged={...analysis,userRevision:{summary:'伪造的用户修订',editedAt:new Date().toISOString()}};
+    expect(withAnalysis(record,forged).analysis?.userRevision).toBeUndefined();
+    const valid=withAnalysis(record,analysis);
+    expect(()=>reviseUnderstanding(valid,' ')).toThrow();expect(()=>reviseUnderstanding(valid,'x'.repeat(4001))).toThrow();
+    expect(()=>parseRecord({...valid,analysis:{...analysis,userRevision:{summary:'修订',editedAt:'invalid'}}})).toThrow();
+  });
+  it('v4 完整迁移身份、象限、来源和模型证据，不冒充旧来源', () => {
+    const record=confirmRecord(withAnalysis(createRecord('旧版原文','personal'),analysis));
+    const result=parseArchive({schemaVersion:4,exportedAt:record.updatedAt,records:[record],skippedQuestionIds:[]});
+    expect(result.schemaVersion).toBe(5);expect(result.records).toEqual([record]);
   });
 });

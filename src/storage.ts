@@ -56,7 +56,7 @@ export class IndexedDBRepository implements Repository {
         try {
           if (!request.result) throw new Error('这条记录已被删除');
           const current = parseRecord(request.result, true);
-          if (expectedRevision && current.revision !== expectedRevision) throw new Error('记录已变化，请重新发起理解');
+          if (expectedRevision && current.revision !== expectedRevision) throw new Error('记录已变化，请关闭后重新打开再试');
           const next = parseRecord(change(current));
           if (next.id !== id) throw new Error('记录标识不可变');
           store.put(next);

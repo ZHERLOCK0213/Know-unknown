@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import { IndexedDBRepository } from './storage';
-import { createRecord, confirmRecord, makeArchive, resetRecord, reclassifyRecord, withAnalysis } from './domain';
+import { createRecord, confirmRecord, makeArchive, resetRecord, editRecord, reclassifyRecord, withAnalysis } from './domain';
 import { AIService, NoAIAdapter, type AIAdapter } from './ai';
 const analysis = {summary:'理解建议',provider:'test',model:'fake',generatedAt:new Date().toISOString()};
 const repo = () => new IndexedDBRepository(`test-${crypto.randomUUID()}`);
@@ -99,8 +99,20 @@ it('AI adapter 收到象限上下文；用户改类后的迟到结果不能覆�
   let captured: unknown;
   const service=new AIService(repository,{available:true,analyze:input=>{captured=input;return new Promise(r=>{resolve=r;});}});
   const pending=service.understand(record,new AbortController().signal);
-  expect(captured).toMatchObject({schemaVersion:4,record:{quadrant:'upper_left',placement:{declaredQuadrant:'upper_left',entryPoint:'upper_left',source:'user'}},cognitionContext:{quadrants:{upper_left:{label:'已知的未知'}}}});
+  expect(captured).toMatchObject({schemaVersion:5,record:{quadrant:'upper_left',placement:{declaredQuadrant:'upper_left',entryPoint:'upper_left',source:'user'}},cognitionContext:{quadrants:{upper_left:{label:'知道自己不知道的事'}}}});
   await repository.update(record.id,current=>reclassifyRecord(current,'personal'),record.revision);
   resolve(analysis); await expect(pending).rejects.toThrow();
   expect((await repository.read()).records[0]).toMatchObject({status:'pending',quadrant:'lower_right',text:record.text});
+});
+
+
+it('编辑保留草稿保护边界：迟到结果与过时编辑不能覆盖新原文', async () => {
+  const repository=repo();const record=createRecord('原文','personal');await repository.add(record);
+  let resolve!:(value:unknown)=>void;
+  const service=new AIService(repository,{available:true,analyze:()=>new Promise(r=>{resolve=r;})});
+  const pending=service.understand(record,new AbortController().signal);
+  await repository.update(record.id,current=>editRecord(current,'先保存的新原文'),record.revision);
+  await expect(repository.update(record.id,current=>editRecord(current,'旧窗口的修改'),record.revision)).rejects.toThrow();
+  resolve(analysis);await expect(pending).rejects.toThrow();
+  expect((await repository.read()).records).toMatchObject([{id:record.id,text:'先保存的新原文',status:'pending',quadrant:'lower_right'}]);
 });

@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { createRecord, makeArchive, withAnalysis, confirmRecord } from '../src/domain';
 const appPath = process.env.APP_BASE_PATH || '/';
 async function write(page: Page, text: string, gap = false) {
-  await page.getByRole('button',{name:/象限四/}).click();
-  if (gap) await page.getByRole('button',{name:'我还不知道',exact:true}).click();
+  if (gap) await page.getByRole('button',{name:'新增未知记录',exact:true}).click();
+  else await page.getByRole('button',{name:/象限四/}).click();
   await page.getByRole('textbox').fill(text);
   await page.getByRole('button',{name:'保存到本机',exact:true}).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -96,7 +96,7 @@ test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆�
       const labels = [...document.querySelectorAll('.vertical-label,.horizontal-labels span,.below-map')].map(rect);
       const v=rect(document.querySelector('.vertical-axis')!); const h=rect(document.querySelector('.horizontal-axis')!);
       const overlaps = cards.some(c=>labels.some(l=>c.left<l.right-.5 && c.right>l.left+.5 && c.top<l.bottom-.5 && c.bottom>l.top+.5));
-      const contentOverflow = [...document.querySelectorAll('.quadrant')].some(card=>{const c=card.getBoundingClientRect();return [...card.children].some(child=>child.getBoundingClientRect().bottom>c.bottom+1);});
+      const contentOverflow = [...document.querySelectorAll('.quadrant')].some(card=>{const c=card.getBoundingClientRect();return [...card.querySelectorAll('h2,p,.quad-number,.quad-foot,.quad-action')].some(child=>child.getBoundingClientRect().bottom>c.bottom+1);});
       return {overlaps,contentOverflow,v,h,minX:Math.min(...cards.map(r=>r.left)),maxX:Math.max(...cards.map(r=>r.right)),minY:Math.min(...cards.map(r=>r.top)),maxY:Math.max(...cards.map(r=>r.bottom)),topBottom:cards[0].bottom,bottomTop:cards[2].top,overflow:document.documentElement.scrollWidth>innerWidth};
     });
     expect(geometry.overlaps,`${width}x${height} @${zoom} 标注遮挡`).toBe(false);
@@ -119,10 +119,10 @@ test('坐标轴越过卡片边缘，放大及短屏时标注与状态不被覆�
   await page.screenshot({path:'docs/mobile-preview.png',fullPage:true});
 });
 
-for (const version of [1,2,3]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
+for (const version of [1,2,3,4]) test(`v${version} 旧记录合并、离线保存及导出恢复`, async ({page,context}) => {
   await page.goto(appPath); await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   const stamp=new Date().toISOString();
-  const records=['knowledge','feeling','unclassified'].map((category,i)=>({id:`legacy-${i}`,revision:`legacy-rev-${i}`,text:`旧${category}记录`,kind:'personal',status:'pending',createdAt:stamp,updatedAt:stamp,...(version===2?{category}:{})}));
+  const records=['knowledge','feeling','unclassified'].map((category,i)=>({id:`legacy-${i}`,revision:`legacy-rev-${i}`,text:`旧${category}记录`,kind:'personal',status:'pending',createdAt:stamp,updatedAt:stamp,...(version===2?{category}:{}),...(version===4?{quadrant:'lower_right',placement:{declaredQuadrant:'lower_right',source:'user',entryPoint:'lower_right'}}:{})}));
   const legacy={schemaVersion:version,exportedAt:stamp,records,skippedQuestionIds:[]};
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
   page.once('dialog',d=>d.accept());
@@ -154,9 +154,9 @@ test('象限二录入继承归类，JSON 保留来源，用户可调整并离线
   await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
   await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
   await page.getByRole('button',{name:/象限二/}).click();
-  await page.getByRole('button',{name:'记一笔',exact:true}).click();
-  await expect(page.getByRole('button',{name:'我还不知道',exact:true})).toHaveAttribute('aria-pressed','true');
-  await expect(page.getByText(/保存到：象限二/)).toBeVisible();
+  await page.getByRole('button',{name:'记录',exact:true}).click();
+  await expect(page.getByRole('group',{name:'记录类型'})).toHaveCount(0);
+  await expect(page.getByText(/保存到象限二/)).toBeVisible();
   await page.getByRole('textbox').fill('这是一个我指定放在象限二的陈述');
   await page.getByRole('button',{name:'保存到本机',exact:true}).click();
   await expect(page.getByRole('button',{name:/象限二/})).toContainText('1 条探索');
@@ -176,8 +176,8 @@ test('象限二录入继承归类，JSON 保留来源，用户可调整并离线
   await page.getByRole('button',{name:/导出 JSON/}).click();
   const file=await(await downloading).path();
   const archive=JSON.parse(await readFile(file!,'utf8'));
-  expect(archive.schemaVersion).toBe(4);
-  expect(archive.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',label:'已知的未知'});
+  expect(archive.schemaVersion).toBe(5);
+  expect(archive.cognitionContext.quadrants.upper_left).toMatchObject({number:2,name:'象限二',label:'知道自己不知道的事'});
   expect(archive.records.find((r:{text:string})=>r.text==='这是一个我指定放在象限二的陈述')).toMatchObject({quadrant:'upper_left',status:'pending',placement:{declaredQuadrant:'upper_left',source:'user',entryPoint:'upper_left'}});
   expect(archive.records.find((r:{text:string})=>r.text==='这是来自象限四的记录')).toMatchObject({quadrant:'lower_right',placement:{declaredQuadrant:'lower_right',source:'user',entryPoint:'lower_right'}});
   // Invalid v4 metadata must not replace good local records.
@@ -248,9 +248,9 @@ test('统一象限称呼，象限三可打开，取消删除保留资料、确�
   const archive=makeArchive([shared,agreed,gap,pending],['local:help:v3','local:gap:v3']);
   await page.goto(appPath); await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
   await page.getByRole('button',{name:/象限三/}).click();
-  await expect(page.getByRole('heading',{name:'象限三 · 未知的未知',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'象限三 · 不知道自己不知道的事',exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'记一笔',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'记录',exact:true})).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText(/左上|右上|左下|右下/);
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
@@ -288,4 +288,62 @@ test('统一象限称呼，象限三可打开，取消删除保留资料、确�
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
   const downloading=page.waitForEvent('download');await page.getByRole('button',{name:'导出 JSON · 0 条'}).click();
   const file=await(await downloading).path();expect(JSON.parse(await readFile(file!,'utf8')).records).toEqual([]);
+});
+
+
+test('批注交互：固定入口、竖排标签、大关闭按钮与原生键盘输入', async ({page}) => {
+  await page.goto(appPath);
+  await expect(page.locator('.quad-icon')).toHaveCount(0);
+  await expect(page.locator('.vertical-word').first()).toHaveCSS('writing-mode','vertical-rl');
+  await expect(page.locator('.vertical-word').last()).toHaveCSS('writing-mode','vertical-rl');
+  await page.getByRole('button',{name:/象限四/}).click();
+  await expect(page.getByRole('heading',{name:'记录',exact:true})).toBeVisible();
+  await expect(page.getByRole('group',{name:'记录类型'})).toHaveCount(0);
+  await expect(page.locator('.editor-context')).toHaveText('我知道，AI 不知道');
+  const close=await page.getByRole('button',{name:'关闭',exact:true}).boundingBox();
+  expect(close?.width).toBeGreaterThanOrEqual(44);expect(close?.height).toBeGreaterThanOrEqual(44);
+  await expect(page.getByRole('textbox')).toBeFocused();
+  await expect(page.getByRole('button',{name:'键盘听写',exact:true})).toHaveCount(0);
+  await page.screenshot({path:'docs/editor-preview.png',fullPage:true});
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:'新增未知记录',exact:true}).click();
+  await expect(page.getByText(/保存到象限二/)).toBeVisible();
+  await expect(page.getByRole('group',{name:'记录类型'})).toHaveCount(0);
+});
+
+test('象限一只修订反馈不新增：保留原文与模型原建议，保存失败留草稿，离线导出恢复', async ({page,context}) => {
+  const fake={summary:'模型原始建议',provider:'test',model:'fake',generatedAt:new Date().toISOString()};
+  const record=confirmRecord(withAnalysis(createRecord('不可被反馈编辑覆盖的用户原文','personal'),fake));
+  await page.goto(appPath);await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles({name:'synthetic-feedback.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(makeArchive([record],[])))});
+  await expect(page.getByRole('button',{name:'导出 JSON · 1 条'})).toBeVisible();await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:/象限一/}).click();
+  await expect(page.getByRole('button',{name:'记录',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'编辑反馈',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'修订 AI 反馈',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveValue(fake.summary);
+  await expect(page.getByRole('button',{name:'保存修改',exact:true})).toBeDisabled();
+  await page.getByRole('textbox').fill('用户认为更准确的理解');
+  // Force an actual transaction failure; edit must remain in the input.
+  await page.evaluate(() => {const original=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(...args:Parameters<IDBDatabase['transaction']>){IDBDatabase.prototype.transaction=original;throw new Error('模拟编辑保存失败');};});
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await expect(page.getByRole('textbox')).toHaveValue('用户认为更准确的理解');
+  await expect(page.getByRole('alert')).toContainText('模拟编辑保存失败');
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.getByRole('button',{name:/象限一/}).click();
+  await expect(page.getByText(record.text,{exact:true})).toBeVisible();await expect(page.getByText('用户认为更准确的理解',{exact:true})).toBeVisible();
+  await expect(page.locator('.badge')).toHaveText('待确认');
+  await page.getByText('查看 AI 原建议',{exact:true}).click();await expect(page.getByText(fake.summary,{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'确认修订',exact:true}).click();await expect(page.locator('.badge')).toHaveText('已确认');
+  page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'撤回确认',exact:true}).click();
+  await expect(page.getByText('用户认为更准确的理解',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await context.setOffline(true);await page.reload();await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  const downloading=page.waitForEvent('download');await page.getByRole('button',{name:'导出 JSON · 1 条'}).click();
+  const file=await(await downloading).path();const archive=JSON.parse(await readFile(file!,'utf8'));
+  expect(archive.schemaVersion).toBe(5);expect(archive.records[0]).toMatchObject({id:record.id,text:record.text,status:'confirmed',quadrant:'upper_right',analysis:{summary:fake.summary,userRevision:{summary:'用户认为更准确的理解'}}});
+  page.once('dialog',d=>d.accept());await page.locator('input[type=file]').setInputFiles(file!);
+  await page.getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:/象限一/}).click();
+  await expect(page.getByText('用户认为更准确的理解',{exact:true})).toBeVisible();await expect(page.getByText(record.text,{exact:true})).toBeVisible();
 });

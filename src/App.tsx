@@ -1,23 +1,27 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { createRecord, confirmRecord, resetRecord, reclassifyRecord, quadrantNames, quadrantLabels, quadrant, statusLabel, nextQuestion, parseArchive, MAX_TEXT, type Archive, type CognitiveRecord, type Kind, type EntryPoint } from './domain';
+import { createRecord, confirmRecord, resetRecord, editRecord, reviseUnderstanding, reclassifyRecord, quadrantNames, quadrantLabels, quadrant, statusLabel, nextQuestion, parseArchive, MAX_TEXT, type Archive, type CognitiveRecord, type Kind, type EntryPoint } from './domain';
 import { IndexedDBRepository } from './storage';
 import { AIService, NoAIAdapter } from './ai';
 import { APP_VERSION, subscribeUpdates, getUpdateState, checkForUpdates, applyUpdate } from './pwa';
 const repository = new IndexedDBRepository();
 const ai = new AIService(repository, new NoAIAdapter());
 type Panel = 'all' | 'shared' | 'gaps' | 'unexplored' | 'settings' | 'write';
-const panelTitle: Record<Panel, string> = { all: '全部记录', shared: '象限一 · 共同认知', gaps: '象限二 · 已知的未知', unexplored: '象限三 · 未知的未知', settings: '数据与隐私', write: '记一笔' };
+function PencilIcon() { return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 4l4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z"/></svg>; }
+const panelTitle: Record<Panel, string> = { all: '全部记录', shared: '象限一 · 共同认知', gaps: '象限二 · 知道自己不知道的事', unexplored: '象限三 · 不知道自己不知道的事', settings: '数据与隐私', write: '记录' };
 export default function App() {
   const title = '知不知';
   const update = useSyncExternalStore(subscribeUpdates, getUpdateState);
   const [archive, setArchive] = useState<Archive>();
   const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [panel, setPanel] = useState<Panel>(); const [text, setText] = useState('');
+  const [editing, setEditing] = useState<CognitiveRecord>();
   const [kind, setKind] = useState<Kind>('personal'); const [entryPoint, setEntryPoint] = useState<EntryPoint>('lower_right'); const [answerId, setAnswerId] = useState<string>();
   const [busy, setBusy] = useState(false); const [online, setOnline] = useState(navigator.onLine);
   const [offlineReady, setOfflineReady] = useState(false); const [offlineError, setOfflineError] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null); const channel = useRef<BroadcastChannel | null>(null);
   const mutationLock = useRef(false);
+  const editingFeedback = editing?.analysis !== undefined;
+  const dirty = panel === 'write' && (editing ? text.trim() !== (editing.analysis?.userRevision?.summary ?? editing.analysis?.summary ?? editing.text) : !!text.trim());
   async function reload() { setArchive(await repository.read()); }
   useEffect(() => {
     void reload().catch(e => setError(e.message));
@@ -37,11 +41,14 @@ export default function App() {
     const url = new URL(location.href); url.searchParams.delete('category');
     history.replaceState(null, '', url);
   }, [title]);
-  useEffect(() => { if (panel && !dialog.current?.open) dialog.current?.showModal(); }, [panel]);
   useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => { if (panel === 'write' && text.trim()) e.preventDefault(); };
+    if (panel && !dialog.current?.open) dialog.current?.showModal();
+    if (panel === 'write') dialog.current?.querySelector('textarea')?.focus();
+  }, [panel]);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (dirty) e.preventDefault(); };
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
-  }, [text, panel]);
+  }, [dirty]);
   async function run(action: () => Promise<void>, message: string) {
     if (mutationLock.current || update.applying) return false;
     mutationLock.current = true; setBusy(true); setError(''); setNotice('');
@@ -51,8 +58,8 @@ export default function App() {
   }
   function close() {
     if (busy || update.applying) return;
-    if (panel === 'write' && text.trim() && !window.confirm('还没有保存。确定放弃这段记录？')) return;
-    dialog.current?.close(); setPanel(undefined); setText(''); setAnswerId(undefined);
+    if (dirty && !window.confirm('还没有保存。确定放弃这段记录？')) return;
+    dialog.current?.close(); setPanel(undefined); setText(''); setAnswerId(undefined); setEditing(undefined);
   }
   function updateApp() {
     if (mutationLock.current || update.applying || (panel === 'write' && text.length > 0)) return;
@@ -60,11 +67,18 @@ export default function App() {
     if (!applyUpdate()) mutationLock.current = false;
   }
   useEffect(() => { if (!update.applying) mutationLock.current = false; }, [update.applying]);
-  function write(id?: string, initialKind: Kind = 'personal', origin: EntryPoint = 'lower_right') { if (update.applying) return; setText(''); setKind(initialKind); setEntryPoint(origin); setAnswerId(id); setError(''); setPanel('write'); }
+  function write(id?: string, initialKind: Kind = 'personal', origin: EntryPoint = 'lower_right') { if (update.applying) return; setEditing(undefined); setText(''); setKind(initialKind); setEntryPoint(origin); setAnswerId(id); setError(''); setPanel('write'); }
+  function edit(record: CognitiveRecord) {
+    if (busy || update.applying) return;
+    setEditing(record); setText(record.analysis?.userRevision?.summary ?? record.analysis?.summary ?? record.text); setKind(record.kind); setEntryPoint(record.placement.entryPoint);
+    setAnswerId(undefined); setError(''); setNotice(''); setPanel('write');
+  }
   async function save(e: FormEvent) {
     e.preventDefault();
-    const success = await run(() => repository.add(createRecord(text, kind, entryPoint), answerId), '已保存在本机。AI 尚未理解这条记录。');
-    if (success) { setText(''); setAnswerId(undefined); dialog.current?.close(); setPanel(undefined); }
+    const success = await run(() => editing
+      ? repository.update(editing.id, current => editingFeedback ? reviseUnderstanding(current, text) : editRecord(current, text), editing.revision)
+      : repository.add(createRecord(text, kind, entryPoint), answerId), editingFeedback ? '你的修订已保存在本机，等待确认，尚未发送给 AI。' : editing ? '修改已保存在本机，等待 AI 重新理解。' : '已保存在本机。AI 尚未理解这条记录。');
+    if (success) { setText(''); setAnswerId(undefined); setEditing(undefined); dialog.current?.close(); setPanel(undefined); }
   }
   async function download() {
     await run(async () => {
@@ -91,27 +105,30 @@ export default function App() {
     return <article className="record" key={record.id}>
       <div className="record-meta"><span className={`badge ${record.status}`}>{record.kind === 'known_unknown' && record.status === 'pending' ? '待探索' : statusLabel[record.status]}</span><time dateTime={record.createdAt}>{new Date(record.createdAt).toLocaleDateString('zh-CN')}</time></div>
       <p className="hint">{quadrantLabels[record.quadrant]} · {record.placement.source === 'user' ? '用户指定归类' : '旧记录推定，原录入入口未留存'}{record.quadrant !== record.placement.declaredQuadrant && <>（用户归类：{quadrantLabels[record.placement.declaredQuadrant]}）</>}</p><p className="original">{record.text}</p>
-      {record.analysis ? <div className="analysis"><small>{'AI 的理解建议'}</small><p>{record.analysis.summary}</p><small>{record.analysis.provider} · {record.analysis.model} · {new Date(record.analysis.generatedAt).toLocaleString('zh-CN')}</small></div> : <p className="hint">仅已保存，AI 尚未提供理解。</p>}
+      {record.analysis ? <div className="analysis"><small>{record.analysis.userRevision ? '用户修订' : 'AI 的理解建议'}</small><p>{record.analysis.userRevision?.summary ?? record.analysis.summary}</p>{record.analysis.userRevision && <><p className="hint">本机修订，尚未发送给 AI。</p><details><summary>查看 AI 原建议</summary><p>{record.analysis.summary}</p></details></>}<small>{record.analysis.provider} · {record.analysis.model} · {new Date(record.analysis.generatedAt).toLocaleString('zh-CN')}</small></div> : <p className="hint">仅已保存，AI 尚未提供理解。</p>}
       <div className="record-actions">
+        <button disabled={busy} onClick={() => edit(record)}>{record.analysis ? '编辑反馈' : '编辑记录'}</button>
         {record.status === 'pending' && <button disabled={busy} onClick={() => void run(() => repository.update(record.id, current => reclassifyRecord(current, record.kind === 'personal' ? 'known_unknown' : 'personal'), record.revision), '已按你的选择调整象限，原文保留。')}>{record.kind === 'personal' ? '移到象限二' : '移到象限四'}</button>}
         {record.status === 'pending' && <button disabled={!ai.adapter.available || busy} title="首版未接入模型">等待接入模型</button>}
-        {record.status === 'understood' && <button disabled={busy} onClick={() => void run(() => repository.update(record.id, confirmRecord, record.revision), '已确认这次理解。')}>确认这次理解</button>}
-        {record.status !== 'pending' && <button disabled={busy} onClick={() => void run(() => repository.update(record.id, resetRecord, record.revision), '已退回待理解，旧建议已移除。')}>{record.status === 'confirmed' ? '撤回确认' : '理解有误'}</button>}
+        {record.status === 'understood' && <button disabled={busy} onClick={() => void run(() => repository.update(record.id, confirmRecord, record.revision), record.analysis?.userRevision ? '已确认你的修订，尚未发送给 AI。' : '已确认这次理解。')}>{record.analysis?.userRevision ? '确认修订' : '确认这次理解'}</button>}
+        {record.status !== 'pending' && <button disabled={busy} onClick={() => { if (!record.analysis?.userRevision || window.confirm('重新理解会移除当前 AI 建议及你的修订。确定继续？')) void run(() => repository.update(record.id, resetRecord, record.revision), '已退回待理解，旧建议已移除。'); }}>{record.status === 'confirmed' ? '撤回确认' : '理解有误'}</button>}
         <button className="text-button danger" disabled={busy} onClick={() => { if (window.confirm('确定删除这条记录？')) void run(() => repository.remove(record.id), '已删除记录。'); }}>删除</button>
       </div>
     </article>;
   }
-  const questionPrompt = question && <aside className="question"><div><small>{question.source === 'local' ? '一个本地小提示 · 非 AI 观察' : 'AI 想多了解一点'}</small><p>{question.text}</p></div><div className="question-actions"><button className="text-button" disabled={busy} onClick={() => void run(() => repository.skip(question.id), '已跳过，不必回答。')}>跳过</button><button className="text-button" disabled={busy} onClick={() => write(question.id, 'personal', 'question_prompt')}>记一笔 ↗</button></div></aside>;
+  const questionPrompt = question && <aside className="question"><div><small>{question.source === 'local' ? '一个本地小提示 · 非 AI 观察' : 'AI 想多了解一点'}</small><p>{question.text}</p></div><div className="question-actions"><button className="text-button" disabled={busy} onClick={() => void run(() => repository.skip(question.id), '已跳过，不必回答。')}>跳过</button><button className="text-button" disabled={busy} onClick={() => write(question.id, 'personal', 'question_prompt')}>记录 ↗</button></div></aside>;
   return <main>
     <header><div className="app-brand"><h1>{title}</h1><span>Know-unknown</span></div><button className="settings-button" onClick={() => { setError(''); setPanel('settings'); }}>数据与隐私</button></header>
-    <div className="map-shell"><span className="axis vertical-axis" aria-hidden="true"/><span className="axis horizontal-axis" aria-hidden="true"/><div className="vertical-label top">AI 知道 <span>↑</span></div><div className="horizontal-labels"><span>← 我不知道</span><span>我知道 →</span></div>
+    <div className="map-shell"><span className="axis vertical-axis" aria-hidden="true"/><span className="axis horizontal-axis" aria-hidden="true"/>
+      <div className="vertical-label top" aria-label="AI 知道"><span aria-hidden="true">↑</span><span className="vertical-word"><span className="axis-ai">AI</span>知道</span></div>
+      <div className="horizontal-labels"><span>← 我不知道</span><span>我知道 →</span></div>
       <section className="quadrants" aria-label={title}>
-        <button className="quadrant gaps" onClick={() => setPanel('gaps')}><span className="quad-number"><strong>{quadrantNames.upper_left}</strong> <span>↗</span></span><span className="quad-icon">?</span><h2>已知的未知</h2><p>我还不明白的事<br/>等待进一步探索</p><span className="quad-foot">{groups.gaps.length ? `${groups.gaps.length} 条探索` : '给好奇心留个位置'} <span>↗</span></span></button>
-        <button className="quadrant shared" onClick={() => setPanel('shared')}><span className="quad-number"><strong>{quadrantNames.upper_right}</strong> <span>↗</span></span><span className="quad-icon">⌁</span><h2>共同认知</h2><p>AI 给出理解<br/>由我来确认</p><span className="quad-foot">{groups.shared.length} 条理解 · {groups.shared.filter(r => r.status === 'confirmed').length} 已确认 <span>↗</span></span></button>
-        <button className="quadrant unknown" onClick={() => setPanel('unexplored')}><span className="quad-number"><strong>{quadrantNames.lower_left}</strong> <span>↗</span></span><span className="quad-icon">∴</span><h2>未知的未知</h2><p>尚待探索的可能<br/>由你决定是否保留</p><span className="quad-foot">{groups.unexplored.length ? `${groups.unexplored.length} 条记录` : '尚无记录'} <span>↗</span></span></button>
-        <button className="quadrant inbox" disabled={!archive} onClick={() => write()}><span className="quad-number"><strong>{quadrantNames.lower_right}</strong> <span>＋</span></span><span className="quad-icon plus">＋</span><h2>我的记录</h2><p>知识、经历或感受<br/>都从这里记下</p><span className="quad-foot">点击记下一点 <span>↗</span></span></button>
+        <div className="quadrant gaps"><button className="quad-body" onClick={() => setPanel('gaps')}><span className="quad-number"><strong>{quadrantNames.upper_left}</strong></span><h2>知道自己<br/>不知道的事</h2><p>比如：怎样设计航天飞机？</p><span className="quad-foot">{groups.gaps.length} 条探索</span></button><button className="quad-action" aria-label="新增未知记录" disabled={!archive || busy} onClick={() => write(undefined, 'known_unknown', 'upper_left')}>＋</button></div>
+        <button className="quadrant shared" aria-label="象限一 · 查看和编辑已有 AI 反馈" onClick={() => setPanel('shared')}><span className="quad-number"><strong>{quadrantNames.upper_right}</strong><span className="quad-action-icon"><PencilIcon /></span></span><h2>共同认知</h2><p>AI 给出理解<br/>由我来确认</p><span className="quad-foot">{groups.shared.length} 条理解 · {groups.shared.filter(r => r.status === 'confirmed').length} 已确认</span></button>
+        <button className="quadrant unknown" onClick={() => setPanel('unexplored')}><span className="quad-number"><strong>{quadrantNames.lower_left}</strong></span><h2>不知道自己<br/>不知道的事</h2><span className="quad-foot">{groups.unexplored.length ? `${groups.unexplored.length} 条记录` : '尚无记录'}</span></button>
+        <button className="quadrant inbox" disabled={!archive} onClick={() => write()}><span className="quad-number"><strong>{quadrantNames.lower_right}</strong><span className="quad-action-icon" aria-hidden="true">＋</span></span><h2>我知道<br/>AI 不知道</h2><p>当下的最新状况<br/>比如：我的面试通过了</p><span className="quad-foot">点击记录</span></button>
       </section>
-      <div className="vertical-label bottom">AI 不知道 <span>↓</span></div>
+      <div className="vertical-label bottom" aria-label="AI 不知道"><span className="vertical-word"><span className="axis-ai">AI</span>不知道</span><span aria-hidden="true">↓</span></div>
     </div>
     <div className="below-map"><span><i className={`dot ${!online ? 'offline' : ''}`}/>{offlineError ? '离线缓存失败，请联网重试' : !online ? '当前离线 · 仍可记录' : offlineReady ? '已可离线使用' : '记录保存在本机'}</span><button className="text-button" disabled={!archive} onClick={() => setPanel('all')}>全部记录 {records.length} <span>→</span></button></div>
     {update.available && !panel && <aside className="update-notice" aria-label="应用更新"><span>有新版本</span><button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button></aside>}
@@ -119,9 +136,9 @@ export default function App() {
     {notice && <p role="status" className="notice">{notice}</p>}
     {!panel && error && <div role="alert" className="error">{error} <button onClick={() => void run(reload, '已重新读取本机资料。')}>重试</button></div>}
     <dialog ref={dialog} onCancel={e => { e.preventDefault(); close(); }} onClose={() => setPanel(undefined)} aria-labelledby="panel-title">
-      <div className="dialog-header"><div><p className="eyebrow">Know-unknown</p><h2 id="panel-title">{panel && panelTitle[panel]}</h2></div><button className="close" disabled={busy} onClick={close} aria-label="关闭">×</button></div>
-      {panel === 'write' && <form onSubmit={save}><div className="kind-picker" role="group" aria-label="记录类型"><button type="button" aria-pressed={kind === 'personal'} onClick={() => setKind('personal')}>我知道</button><button type="button" aria-pressed={kind === 'known_unknown'} onClick={() => setKind('known_unknown')}>我还不知道</button></div><label htmlFor="note">{kind === 'personal' ? '记下一件你知道的事' : '记下一件你还不明白的事'}</label><textarea id="note" autoFocus value={text} maxLength={MAX_TEXT} disabled={busy} onChange={e => setText(e.target.value)} placeholder={kind === 'personal' ? '一点知识、一个想法、一次感受，都可以。' : '例如：我还不明白，为什么开会前总是紧张。'}/><div className="editor-bottom"><span>{text.length} / {MAX_TEXT}</span><button className="primary" disabled={busy || !text.trim()}>{busy ? '保存中…' : '保存到本机'}</button></div><p className="hint" aria-live="polite">保存到：{kind === 'known_unknown' ? quadrantLabels.upper_left : quadrantLabels.lower_right}。由你决定归类，保存不等于 AI 理解。</p></form>}
-      {(panel === 'all' || panel === 'shared' || panel === 'gaps' || panel === 'unexplored') && <div><p className="panel-description">{panel === 'all' ? '所有已保存记录都在这里；调整象限后仍会保留，理解与确认状态分别标注。' : panel === 'shared' ? '这里的原文与理解建议只读。确认代表你认可这一次理解，写错或不需要的条目可删除。' : panel === 'unexplored' ? '这里保留待探索的条目，你可以逐条查看或删除。' : '只展示你主动记录的未知与困惑，不替你判断。'}</p>{panel === 'all' && questionPrompt}{groups[panel].length ? [...groups[panel]].reverse().map(recordView) : <div className="empty"><span>○</span><h3>{panel === 'shared' ? '共同认知，慢慢形成' : panel === 'gaps' ? '好奇心还未落笔' : '这里还没有记录'}</h3><p>{panel === 'shared' ? '接入模型并核对理解后，记录会出现在这里。' : panel === 'unexplored' ? '有记录后，可在这里查看或删除。' : '从象限四记下一件小事就好。'}</p></div>}{(panel === 'all' || panel === 'gaps') && <button className="primary full" onClick={() => write(undefined, panel === 'gaps' ? 'known_unknown' : 'personal', panel === 'gaps' ? 'upper_left' : 'record_list')}>记一笔</button>}</div>}
+      <div className="dialog-header"><div><h2 id="panel-title">{panel === 'write' && editingFeedback ? '修订 AI 反馈' : panel === 'write' && editing ? '编辑记录' : panel && panelTitle[panel]}</h2></div><button className="close" disabled={busy} onClick={close} aria-label="关闭">×</button></div>
+      {panel === 'write' && <form onSubmit={save}><p className="editor-context">{editingFeedback ? '写下你认为更准确的理解' : kind === 'personal' ? '我知道，AI 不知道' : '我还不知道，等待探索'}</p><label className="sr-only" htmlFor="note">{editingFeedback ? '修订 AI 反馈' : kind === 'personal' ? '记下一件你知道的事' : '记下一件你还不明白的事'}</label><textarea id="note" autoFocus value={text} maxLength={MAX_TEXT} disabled={busy} onChange={e => setText(e.target.value)} placeholder={kind === 'personal' ? '一点知识、一个想法、一次感受，都可以。' : '例如：我想知道怎样设计航天飞机。'}/><div className="editor-bottom"><span>{text.length} / {MAX_TEXT}</span><button className="primary" disabled={busy || !text.trim() || (editing !== undefined && !dirty)}>{busy ? '保存中…' : editing ? '保存修改' : '保存到本机'}</button></div><p className="hint" aria-live="polite">{editingFeedback ? '保留 AI 原建议，保存为用户修订，等待确认。' : editing && editing.status !== 'pending' ? `修改后回到${kind === 'known_unknown' ? '象限二' : '象限四'}，原理解与确认失效。` : `保存到${kind === 'known_unknown' ? '象限二' : '象限四'} · 仅已保存，AI 尚未理解。`}</p></form>}
+      {(panel === 'all' || panel === 'shared' || panel === 'gaps' || panel === 'unexplored') && <div><p className="panel-description">{panel === 'all' ? '所有已保存记录都在这里；调整象限后仍会保留，理解与确认状态分别标注。' : panel === 'shared' ? '可修订 AI 反馈或删除已有记录，不能在此新增。' : panel === 'unexplored' ? '这里保留待探索的条目，你可以逐条查看或删除。' : '你主动记录的未知与困惑，可编辑或删除。'}</p>{panel === 'all' && questionPrompt}{groups[panel].length ? [...groups[panel]].reverse().map(recordView) : <div className="empty"><span>○</span><h3>{panel === 'shared' ? '共同认知，慢慢形成' : panel === 'gaps' ? '好奇心还未落笔' : '这里还没有记录'}</h3><p>{panel === 'shared' ? '接入模型并核对理解后，记录会出现在这里。' : panel === 'unexplored' ? '有记录后，可在这里查看或删除。' : '从象限四记下一件小事就好。'}</p></div>}{(panel === 'all' || panel === 'gaps') && <button className="primary full" onClick={() => write(undefined, panel === 'gaps' ? 'known_unknown' : 'personal', panel === 'gaps' ? 'upper_left' : 'record_list')}>记录</button>}</div>}
       {panel === 'settings' && <div className="settings"><section><h3>应用版本 {APP_VERSION}</h3><p>数据格式 {archive?.schemaVersion ?? '…'} · 更新应用会保留本机已保存记录。</p><div className="record-actions"><button disabled={busy || update.checking || update.applying} onClick={() => void checkForUpdates()}>{update.checking ? '检查中…' : '检查更新'}</button>{update.available && <button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button>}</div><p role="status">{update.message}</p></section><section><h3>你的记录，留在你的设备上</h3><p>首版没有账号、云同步或真实模型。资料保存在当前浏览器，未作应用级加密。不同浏览器不会自动共享。</p><p>清理站点、隐私浏览或设备空间不足可能导致资料丢失。建议定期导出；导出文件为明文，请妥善保存。</p></section><div className="data-actions"><button disabled={busy || !archive} onClick={() => void download()}>导出 JSON · {records.length} 条</button><label className="file-button">从 JSON 恢复<input type="file" accept=".json,application/json" disabled={busy || !archive} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void restore(file); }}/></label><button disabled={busy} onClick={() => void run(async () => { if (!navigator.storage?.persist) throw new Error('当前浏览器不支持请求持久保存'); const granted = await navigator.storage.persist(); if (!granted) throw new Error('浏览器尚未授予持久保存，请继续定期导出'); }, '浏览器已允许持久保存，仍建议定期导出。')}>请求浏览器保留资料</button></div><section><h3>关于 AI</h3><p>当前不收集 API Key、不发送记录。未来支持自填模型 Key 或可选本地模型；只有你主动要求理解时，才发送选中的记录。</p></section><button className="danger text-button" disabled={busy || !archive} onClick={() => { if (window.confirm('清空全部记录与跳过的问题？此操作无法撤销，建议先导出。')) void run(() => repository.clear(), '本机个人资料已清空。'); }}>清空本机全部资料</button></div>}
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="notice">{notice}</p>}

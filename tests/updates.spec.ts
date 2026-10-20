@@ -51,7 +51,7 @@ test('真实静态版本升级：等待用户操作、保留另一窗口草稿�
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await page.reload();
   await page.getByRole('button', { name: /象限二/ }).click();
-  await page.getByRole('button', { name: '记一笔', exact: true }).click();
+  await page.getByRole('button', { name: '记录', exact: true }).click();
   await page.getByRole('textbox').fill('升级前象限二测试');
   await page.getByRole('button', { name: '保存到本机', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -61,7 +61,7 @@ test('真实静态版本升级：等待用户操作、保留另一窗口草稿�
   await editor.getByRole('textbox').fill('另一个窗口未保存的草稿');
   directory = join(fixture, 'next');
   await page.getByRole('button', { name: '数据与隐私', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '应用版本 0.1.3' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '应用版本 0.1.4' })).toBeVisible();
   await page.getByRole('button', { name: '检查更新', exact: true }).click();
   await expect(page.getByRole('button', { name: '更新应用', exact: true })).toBeVisible();
   expect(await page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration())?.waiting)).toBe(true);
@@ -81,7 +81,7 @@ test('真实静态版本升级：等待用户操作、保留另一窗口草稿�
   await page.getByRole('button', { name: '导出 JSON · 2 条' }).click();
   const download = await downloading; const file = await download.path();
   const archive = JSON.parse(await readFile(file!, 'utf8'));
-  expect(archive.schemaVersion).toBe(4);
+  expect(archive.schemaVersion).toBe(5);
   expect(archive.records.map((r: { quadrant: string }) => r.quadrant).sort()).toEqual(['lower_right', 'upper_left']);
   await context.setOffline(true);
   await page.reload();
