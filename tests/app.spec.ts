@@ -330,8 +330,8 @@ test('象限一只修订反馈不新增：保留原文与模型原建议，保�
   await page.getByRole('button',{name:'保存修改',exact:true}).click();
   await expect(page.getByRole('textbox')).toHaveValue('用户认为更准确的理解');
   await expect(page.getByRole('alert')).toContainText('模拟编辑保存失败');
-  await page.getByRole('button',{name:'保存修改',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('button',{name:/象限一/}).click();
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'象限一 · 共同认知',exact:true})).toBeVisible();
   await expect(page.getByText(record.text,{exact:true})).toBeVisible();await expect(page.getByText('用户认为更准确的理解',{exact:true})).toBeVisible();
   await expect(page.locator('.badge')).toHaveText('待确认');
   await page.getByText('查看 AI 原建议',{exact:true}).click();await expect(page.getByText(fake.summary,{exact:true})).toBeVisible();
@@ -346,4 +346,61 @@ test('象限一只修订反馈不新增：保留原文与模型原建议，保�
   page.once('dialog',d=>d.accept());await page.locator('input[type=file]').setInputFiles(file!);
   await page.getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:/象限一/}).click();
   await expect(page.getByText('用户认为更准确的理解',{exact:true})).toBeVisible();await expect(page.getByText(record.text,{exact:true})).toBeVisible();
+});
+
+test('编辑反馈后返回原象限和滚动位置：关闭、放弃、Esc、保存均保留上下文', async ({page}) => {
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  const fake={summary:'仅用于回归的模型建议。'.repeat(8),provider:'test',model:'fake',generatedAt:new Date().toISOString()};
+  const records=Array.from({length:10},(_,i)=>withAnalysis(createRecord(`返回测试条目 ${i}：这段原文需要保留。`,'personal'),fake));
+  await page.goto(appPath);
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles({name:'synthetic-editor-return.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(makeArchive(records,[])))});
+  await expect(page.getByRole('button',{name:'导出 JSON · 10 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:/象限一/}).click();
+  const target=page.locator('article').filter({hasText:records[4].text});
+  const edit=target.getByRole('button',{name:'编辑反馈',exact:true});
+  const dialog=page.getByRole('dialog');
+  await edit.scrollIntoViewIfNeeded();
+  const scrollTop=await dialog.evaluate(element=>element.scrollTop);expect(scrollTop).toBeGreaterThan(100);
+  const returned=async()=>{
+    await expect(page.getByRole('heading',{name:'象限一 · 共同认知',exact:true})).toBeVisible();
+    await expect(edit).toBeFocused();
+    await expect.poll(async()=>Math.abs(await dialog.evaluate(element=>element.scrollTop)-scrollTop)).toBeLessThanOrEqual(2);
+  };
+  await edit.click();await expect(page.getByRole('textbox')).toBeFocused();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();await returned();
+  // Cancel discarding a changed draft, then explicitly discard it.
+  await edit.click();await page.getByRole('textbox').fill('尚未保存的反馈草稿');
+  page.once('dialog',d=>d.dismiss());await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(page.getByRole('textbox')).toHaveValue('尚未保存的反馈草稿');
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'关闭',exact:true}).click();await returned();
+  await edit.click();await expect(page.getByRole('textbox')).toHaveValue(fake.summary);
+  await page.keyboard.press('Escape');await returned();
+  await edit.click();await page.getByRole('textbox').fill('保存后应在原条目看到的用户修订');
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();await returned();
+  await expect(target.getByText('保存后应在原条目看到的用户修订',{exact:true})).toBeVisible();
+  await expect(target.locator('.original')).toHaveText(records[4].text);
+  await target.getByText('查看 AI 原建议',{exact:true}).click();
+  await edit.click();await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(target.locator('details')).toHaveAttribute('open','');
+  // Closing the list still returns home; a new record must not reopen an old list.
+  await page.getByRole('button',{name:'关闭',exact:true}).click();await expect(dialog).not.toBeVisible();
+  await page.getByRole('button',{name:/象限四/}).click();await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(dialog).not.toBeVisible();expect(errors).toEqual([]);
+});
+
+test('全部记录与象限二的原文编辑也返回原列表', async ({page}) => {
+  await page.goto(appPath);await write(page,'原文编辑返回入口测试',true);
+  for(const entry of ['象限二','全部记录 1']){
+    await page.getByRole('button',{name:new RegExp(entry)}).click();
+    const title=entry==='象限二'?'象限二 · 知道自己不知道的事':'全部记录';
+    const target=page.getByRole('button',{name:'编辑记录',exact:true});
+    await target.click();await page.getByRole('button',{name:'关闭',exact:true}).click();
+    await expect(page.getByRole('heading',{name:title,exact:true})).toBeVisible();await expect(target).toBeFocused();
+    await target.click();await page.getByRole('textbox').fill(`从${entry}修改的原文`);
+    await page.getByRole('button',{name:'保存修改',exact:true}).click();
+    await expect(page.getByRole('heading',{name:title,exact:true})).toBeVisible();
+    await expect(page.locator('.original')).toHaveText(`从${entry}修改的原文`);
+    await page.getByRole('button',{name:'关闭',exact:true}).click();
+  }
 });
