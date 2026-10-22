@@ -20,6 +20,7 @@ export default function App() {
   const [busy, setBusy] = useState(false); const [online, setOnline] = useState(navigator.onLine);
   const [offlineReady, setOfflineReady] = useState(false); const [offlineError, setOfflineError] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null); const channel = useRef<BroadcastChannel | null>(null);
+  const scrollContent = useRef<HTMLDivElement>(null);
   const editorReturn = useRef<{ panel: RecordPanel; scrollTop: number; trigger: HTMLButtonElement } | undefined>(undefined);
   const mutationLock = useRef(false);
   const editingFeedback = editing?.analysis !== undefined;
@@ -46,11 +47,11 @@ export default function App() {
   useLayoutEffect(() => {
     if (panel && !dialog.current?.open) dialog.current?.showModal();
     if (panel === 'write') {
-      if (dialog.current) dialog.current.scrollTop = 0;
+      if (scrollContent.current) scrollContent.current.scrollTop = 0;
       dialog.current?.querySelector('textarea')?.focus({ preventScroll: true });
     } else if (editorReturn.current && editorReturn.current.panel === panel) {
       const origin = editorReturn.current;
-      if (dialog.current) dialog.current.scrollTop = origin.scrollTop;
+      if (scrollContent.current) scrollContent.current.scrollTop = origin.scrollTop;
       origin.trigger.focus({ preventScroll: true });
       editorReturn.current = undefined;
     }
@@ -87,7 +88,7 @@ export default function App() {
   function edit(record: CognitiveRecord, trigger: HTMLButtonElement) {
     if (busy || update.applying) return;
     if (panel === 'all' || panel === 'shared' || panel === 'gaps' || panel === 'unexplored') {
-      editorReturn.current = { panel, scrollTop: dialog.current?.scrollTop ?? 0, trigger };
+      editorReturn.current = { panel, scrollTop: scrollContent.current?.scrollTop ?? 0, trigger };
     }
     setEditing(record); setText(record.analysis?.userRevision?.summary ?? record.analysis?.summary ?? record.text); setKind(record.kind); setEntryPoint(record.placement.entryPoint);
     setAnswerId(undefined); setError(''); setNotice(''); setPanel('write');
@@ -157,12 +158,17 @@ export default function App() {
     {notice && <p role="status" className="notice">{notice}</p>}
     {!panel && error && <div role="alert" className="error">{error} <button onClick={() => void run(reload, '已重新读取本机资料。')}>重试</button></div>}
     <dialog ref={dialog} onCancel={e => { e.preventDefault(); close(); }} onClose={() => setPanel(undefined)} aria-labelledby="panel-title">
-      <div className="dialog-header"><div><h2 id="panel-title">{panel === 'write' && editingFeedback ? '修订 AI 反馈' : panel === 'write' && editing ? '编辑记录' : panel && panelTitle[panel]}</h2></div><button className="close" disabled={busy} onClick={close} aria-label="关闭">×</button></div>
-      {panel === 'write' && <form onSubmit={save}><p className="editor-context">{editingFeedback ? '写下你认为更准确的理解' : kind === 'personal' ? '我知道，AI 不知道' : '我还不知道，等待探索'}</p><label className="sr-only" htmlFor="note">{editingFeedback ? '修订 AI 反馈' : kind === 'personal' ? '记下一件你知道的事' : '记下一件你还不明白的事'}</label><textarea id="note" autoFocus value={text} maxLength={MAX_TEXT} disabled={busy} onChange={e => setText(e.target.value)} placeholder={kind === 'personal' ? '一点知识、一个想法、一次感受，都可以。' : '例如：我想知道怎样设计航天飞机。'}/><div className="editor-bottom"><span>{text.length} / {MAX_TEXT}</span><button className="primary" disabled={busy || !text.trim() || (editing !== undefined && !dirty)}>{busy ? '保存中…' : editing ? '保存修改' : '保存到本机'}</button></div><p className="hint" aria-live="polite">{editingFeedback ? '保留 AI 原建议，保存为用户修订，等待确认。' : editing && editing.status !== 'pending' ? `修改后回到${kind === 'known_unknown' ? '象限二' : '象限四'}，原理解与确认失效。` : `保存到${kind === 'known_unknown' ? '象限二' : '象限四'} · 仅已保存，AI 尚未理解。`}</p></form>}
-      {listPanel && <div hidden={panel === 'write'}><p className="panel-description">{listPanel === 'all' ? '所有已保存记录都在这里；调整象限后仍会保留，理解与确认状态分别标注。' : listPanel === 'shared' ? '可修订 AI 反馈或删除已有记录，不能在此新增。' : listPanel === 'unexplored' ? '这里保留待探索的条目，你可以逐条查看或删除。' : '你主动记录的未知与困惑，可编辑或删除。'}</p>{listPanel === 'all' && questionPrompt}{groups[listPanel].length ? [...groups[listPanel]].reverse().map(recordView) : <div className="empty"><span>○</span><h3>{listPanel === 'shared' ? '共同认知，慢慢形成' : listPanel === 'gaps' ? '好奇心还未落笔' : '这里还没有记录'}</h3><p>{listPanel === 'shared' ? '接入模型并核对理解后，记录会出现在这里。' : listPanel === 'unexplored' ? '有记录后，可在这里查看或删除。' : '从象限四记下一件小事就好。'}</p></div>}{(listPanel === 'all' || listPanel === 'gaps') && <button className="primary full" onClick={() => write(undefined, listPanel === 'gaps' ? 'known_unknown' : 'personal', listPanel === 'gaps' ? 'upper_left' : 'record_list')}>记录</button>}</div>}
-      {panel === 'settings' && <div className="settings"><section><h3>应用版本 {APP_VERSION}</h3><p>数据格式 {archive?.schemaVersion ?? '…'} · 更新应用会保留本机已保存记录。</p><div className="record-actions"><button disabled={busy || update.checking || update.applying} onClick={() => void checkForUpdates()}>{update.checking ? '检查中…' : '检查更新'}</button>{update.available && <button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button>}</div><p role="status">{update.message}</p></section><section><h3>你的记录，留在你的设备上</h3><p>首版没有账号、云同步或真实模型。资料保存在当前浏览器，未作应用级加密。不同浏览器不会自动共享。</p><p>清理站点、隐私浏览或设备空间不足可能导致资料丢失。建议定期导出；导出文件为明文，请妥善保存。</p></section><div className="data-actions"><button disabled={busy || !archive} onClick={() => void download()}>导出 JSON · {records.length} 条</button><label className="file-button">从 JSON 恢复<input type="file" accept=".json,application/json" disabled={busy || !archive} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void restore(file); }}/></label><button disabled={busy} onClick={() => void run(async () => { if (!navigator.storage?.persist) throw new Error('当前浏览器不支持请求持久保存'); const granted = await navigator.storage.persist(); if (!granted) throw new Error('浏览器尚未授予持久保存，请继续定期导出'); }, '浏览器已允许持久保存，仍建议定期导出。')}>请求浏览器保留资料</button></div><section><h3>关于 AI</h3><p>当前不收集 API Key、不发送记录。未来支持自填模型 Key 或可选本地模型；只有你主动要求理解时，才发送选中的记录。</p></section><button className="danger text-button" disabled={busy || !archive} onClick={() => { if (window.confirm('清空全部记录与跳过的问题？此操作无法撤销，建议先导出。')) void run(() => repository.clear(), '本机个人资料已清空。'); }}>清空本机全部资料</button></div>}
-      {error && <p role="alert" className="error">{error}</p>}
-      {notice && <p role="status" className="notice">{notice}</p>}
+      <div className="dialog-top">
+        <div className="dialog-header"><div><h2 id="panel-title">{panel === 'write' && editingFeedback ? '修订 AI 反馈' : panel === 'write' && editing ? '编辑记录' : panel && panelTitle[panel]}</h2></div><button className="close" disabled={busy} onClick={close} aria-label="关闭">×</button></div>
+        {listPanel && panel !== 'write' && <p className="panel-description">{listPanel === 'all' ? '所有已保存记录都在这里；调整象限后仍会保留，理解与确认状态分别标注。' : listPanel === 'shared' ? '可修订 AI 反馈或删除已有记录，不能在此新增。' : listPanel === 'unexplored' ? '这里保留待探索的条目，你可以逐条查看或删除。' : '你主动记录的未知与困惑，可编辑或删除。'}</p>}
+      </div>
+      <div className="dialog-content" ref={scrollContent}>
+        {panel === 'write' && <form onSubmit={save}><p className="editor-context">{editingFeedback ? '写下你认为更准确的理解' : kind === 'personal' ? '我知道，AI 不知道' : '我还不知道，等待探索'}</p><label className="sr-only" htmlFor="note">{editingFeedback ? '修订 AI 反馈' : kind === 'personal' ? '记下一件你知道的事' : '记下一件你还不明白的事'}</label><textarea id="note" autoFocus value={text} maxLength={MAX_TEXT} disabled={busy} onChange={e => setText(e.target.value)} placeholder={kind === 'personal' ? '一点知识、一个想法、一次感受，都可以。' : '例如：我想知道怎样设计航天飞机。'}/><div className="editor-bottom"><span>{text.length} / {MAX_TEXT}</span><button className="primary" disabled={busy || !text.trim() || (editing !== undefined && !dirty)}>{busy ? '保存中…' : editing ? '保存修改' : '保存到本机'}</button></div><p className="hint" aria-live="polite">{editingFeedback ? '保留 AI 原建议，保存为用户修订，等待确认。' : editing && editing.status !== 'pending' ? `修改后回到${kind === 'known_unknown' ? '象限二' : '象限四'}，原理解与确认失效。` : `保存到${kind === 'known_unknown' ? '象限二' : '象限四'} · 仅已保存，AI 尚未理解。`}</p></form>}
+        {listPanel && <div hidden={panel === 'write'}>{listPanel === 'all' && questionPrompt}{groups[listPanel].length ? [...groups[listPanel]].reverse().map(recordView) : <div className="empty"><span>○</span><h3>{listPanel === 'shared' ? '共同认知，慢慢形成' : listPanel === 'gaps' ? '好奇心还未落笔' : '这里还没有记录'}</h3><p>{listPanel === 'shared' ? '接入模型并核对理解后，记录会出现在这里。' : listPanel === 'unexplored' ? '有记录后，可在这里查看或删除。' : '从象限四记下一件小事就好。'}</p></div>}{(listPanel === 'all' || listPanel === 'gaps') && <button className="primary full" onClick={() => write(undefined, listPanel === 'gaps' ? 'known_unknown' : 'personal', listPanel === 'gaps' ? 'upper_left' : 'record_list')}>记录</button>}</div>}
+        {panel === 'settings' && <div className="settings"><section><h3>应用版本 {APP_VERSION}</h3><p>数据格式 {archive?.schemaVersion ?? '…'} · 更新应用会保留本机已保存记录。</p><div className="record-actions"><button disabled={busy || update.checking || update.applying} onClick={() => void checkForUpdates()}>{update.checking ? '检查中…' : '检查更新'}</button>{update.available && <button disabled={busy || update.applying} onClick={updateApp}>{update.applying ? '更新中…' : '更新应用'}</button>}</div><p role="status">{update.message}</p></section><section><h3>你的记录，留在你的设备上</h3><p>首版没有账号、云同步或真实模型。资料保存在当前浏览器，未作应用级加密。不同浏览器不会自动共享。</p><p>清理站点、隐私浏览或设备空间不足可能导致资料丢失。建议定期导出；导出文件为明文，请妥善保存。</p></section><div className="data-actions"><button disabled={busy || !archive} onClick={() => void download()}>导出 JSON · {records.length} 条</button><label className="file-button">从 JSON 恢复<input type="file" accept=".json,application/json" disabled={busy || !archive} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void restore(file); }}/></label><button disabled={busy} onClick={() => void run(async () => { if (!navigator.storage?.persist) throw new Error('当前浏览器不支持请求持久保存'); const granted = await navigator.storage.persist(); if (!granted) throw new Error('浏览器尚未授予持久保存，请继续定期导出'); }, '浏览器已允许持久保存，仍建议定期导出。')}>请求浏览器保留资料</button></div><section><h3>关于 AI</h3><p>当前不收集 API Key、不发送记录。未来支持自填模型 Key 或可选本地模型；只有你主动要求理解时，才发送选中的记录。</p></section><button className="danger text-button" disabled={busy || !archive} onClick={() => { if (window.confirm('清空全部记录与跳过的问题？此操作无法撤销，建议先导出。')) void run(() => repository.clear(), '本机个人资料已清空。'); }}>清空本机全部资料</button></div>}
+        {error && <p role="alert" className="error">{error}</p>}
+        {notice && <p role="status" className="notice">{notice}</p>}
+      </div>
     </dialog>
   </main>;
 }

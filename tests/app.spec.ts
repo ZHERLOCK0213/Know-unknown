@@ -362,12 +362,14 @@ test('编辑反馈后返回原象限和滚动位置：关闭、放弃、Esc、�
   const target=page.locator('article').filter({hasText:records[4].text});
   const edit=target.getByRole('button',{name:'编辑反馈',exact:true});
   const dialog=page.getByRole('dialog');
+  const scroller=page.locator('.dialog-content');
   await edit.scrollIntoViewIfNeeded();
-  const scrollTop=await dialog.evaluate(element=>element.scrollTop);expect(scrollTop).toBeGreaterThan(100);
+  const scrollTop=await scroller.evaluate(element=>element.scrollTop);expect(scrollTop).toBeGreaterThan(100);
   const returned=async()=>{
     await expect(page.getByRole('heading',{name:'象限一 · 共同认知',exact:true})).toBeVisible();
     await expect(edit).toBeFocused();
-    await expect.poll(async()=>Math.abs(await dialog.evaluate(element=>element.scrollTop)-scrollTop)).toBeLessThanOrEqual(2);
+    await expect.poll(async()=>Math.abs(await scroller.evaluate(element=>element.scrollTop)-scrollTop)).toBeLessThanOrEqual(2);
+    await expect(page.getByRole('button',{name:'关闭',exact:true})).toBeInViewport();
   };
   await edit.click();await expect(page.getByRole('textbox')).toBeFocused();
   await page.getByRole('button',{name:'关闭',exact:true}).click();await returned();
@@ -404,5 +406,35 @@ test('全部记录与象限二的原文编辑也返回原列表', async ({page})
     await expect(page.getByRole('heading',{name:title,exact:true})).toBeVisible();
     await expect(page.locator('.original')).toHaveText(`从${entry}修改的原文`);
     await page.getByRole('button',{name:'关闭',exact:true}).click();
+  }
+});
+
+test('长列表固定标题、说明和关闭按钮，手机短屏与桌面只滚动内容', async ({page}) => {
+  const fake={summary:'用于固定栏验收的虚构模型建议。'.repeat(6),provider:'test',model:'fake',generatedAt:new Date().toISOString()};
+  const records=Array.from({length:12},(_,i)=>withAnalysis({...createRecord(`固定栏测试 ${i}：仅用于长列表验收。`,'personal'),id:`header-test-${String(i).padStart(2,'0')}`},fake));
+  await page.goto(appPath);
+  await page.getByRole('button',{name:'数据与隐私',exact:true}).click();page.once('dialog',d=>d.accept());
+  await page.locator('input[type=file]').setInputFiles({name:'synthetic-fixed-header.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(makeArchive(records,[])))});
+  await expect(page.getByRole('button',{name:'导出 JSON · 12 条'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  for(const viewport of [{width:390,height:844},{width:360,height:640},{width:390,height:420},{width:1280,height:900}]){
+    await page.setViewportSize(viewport);await page.getByRole('button',{name:/象限一/}).click();
+    const top=page.locator('.dialog-top');const content=page.locator('.dialog-content');
+    const before=await top.boundingBox();expect(before).not.toBeNull();
+    await content.evaluate(element=>element.scrollTop=element.scrollHeight);
+    expect(await content.evaluate(element=>element.scrollTop)).toBeGreaterThan(100);
+    await expect(page.getByRole('heading',{name:'象限一 · 共同认知',exact:true})).toBeInViewport();
+    await expect(top.getByText('可修订 AI 反馈或删除已有记录，不能在此新增。',{exact:true})).toBeInViewport();
+    const close=page.getByRole('button',{name:'关闭',exact:true});await expect(close).toBeInViewport();
+    const after=await top.boundingBox();const body=await content.boundingBox();
+    expect(Math.abs(after!.y-before!.y)).toBeLessThanOrEqual(1);
+    expect(body!.y).toBeGreaterThanOrEqual(after!.y+after!.height-1);
+    expect(body!.height).toBeGreaterThan(80);
+    expect(await page.getByRole('dialog').evaluate(element=>element.scrollTop)).toBe(0);
+    const button=await close.boundingBox();
+    expect(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.closest('button')?.getAttribute('aria-label'),{x:button!.x+button!.width/2,y:button!.y+button!.height/2})).toBe('关闭');
+    if(viewport.width===390 && viewport.height===844) await test.info().attach('fixed-header-mobile.png',{body:await page.screenshot({path:test.info().outputPath('fixed-header-mobile.png'),fullPage:true}),contentType:'image/png'});
+    // A real click must close the list directly, without first scrolling back to its start.
+    await close.click();await expect(page.getByRole('dialog')).not.toBeVisible();
   }
 });
