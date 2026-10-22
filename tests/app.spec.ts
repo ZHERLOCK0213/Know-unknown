@@ -10,6 +10,7 @@ async function write(page: Page, text: string, gap = false) {
   await expect(page.getByRole('dialog')).not.toBeVisible();
 }
 test('移动端：离线保存、刷新、只读、跳过、导出、恢复和清空', async ({page,context}) => {
+  const packageVersion=JSON.parse(await readFile('package.json','utf8')).version;
   const errors: string[] = []; page.on('pageerror',e => errors.push(e.message));
   await page.goto(appPath); await expect(page.getByRole('heading',{level:1})).toBeVisible();
   await expect(page.getByRole('button',{name:/象限四/})).toBeEnabled();
@@ -34,6 +35,7 @@ test('移动端：离线保存、刷新、只读、跳过、导出、恢复和�
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();
+  await expect(page.getByRole('heading',{name:`应用版本 ${packageVersion}`,exact:true})).toBeVisible();
   const downloadEvent = page.waitForEvent('download');
   await page.getByRole('button',{name:/导出 JSON/}).click();
   const download = await downloadEvent; const file = await download.path(); expect(file).toBeTruthy();
@@ -351,7 +353,7 @@ test('象限一只修订反馈不新增：保留原文与模型原建议，保�
 test('编辑反馈后返回原象限和滚动位置：关闭、放弃、Esc、保存均保留上下文', async ({page}) => {
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   const fake={summary:'仅用于回归的模型建议。'.repeat(8),provider:'test',model:'fake',generatedAt:new Date().toISOString()};
-  const records=Array.from({length:10},(_,i)=>withAnalysis(createRecord(`返回测试条目 ${i}：这段原文需要保留。`,'personal'),fake));
+  const records=Array.from({length:10},(_,i)=>withAnalysis({...createRecord(`返回测试条目 ${i}：这段原文需要保留。`,'personal'),id:`editor-return-${i}`},fake));
   await page.goto(appPath);
   await page.getByRole('button',{name:'数据与隐私',exact:true}).click();page.once('dialog',d=>d.accept());
   await page.locator('input[type=file]').setInputFiles({name:'synthetic-editor-return.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(makeArchive(records,[])))});
